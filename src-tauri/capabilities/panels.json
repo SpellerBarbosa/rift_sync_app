@@ -1,0 +1,11 @@
+{
+  "identifier": "panels",
+  "description": "Permissões para as janelinhas rune_panel e build_panel",
+  "windows": ["rune_panel", "build_panel"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit"
+  ]
+}

@@ -1,0 +1,33 @@
+# Dependências
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+
+# Tauri build
+src-tauri/target/
+src-tauri/gen/
+
+# Ambiente — NUNCA commitar chaves de API
+.env
+.env.local
+.env.production
+# .env.example é commitado intencionalmente (sem valores reais)
+
+# Logs
+*.log
+logs/
+
+# Editor
+.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db

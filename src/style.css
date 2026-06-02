@@ -1,0 +1,74 @@
+/* ============================================================
+   RiftSync AI — Estilos globais
+   Design tokens, reset e utilitários base
+   ============================================================ */
+@import "tailwindcss";
+
+/* ── Design Tokens ─────────────────────────────────────────── */
+@theme {
+  /* Paleta principal */
+  --color-rs-black:   #0A0A0B;  /* fundo principal */
+  --color-rs-gold:    #C89B3C;  /* dourado LoL — cor de destaque */
+  --color-rs-white:   #E8E0D0;  /* texto principal */
+
+  /* Paleta de suporte */
+  --color-rs-blue:    #1C2A3A;  /* superfície de cartões */
+  --color-rs-danger:  #C0392B;  /* alertas críticos */
+  --color-rs-success: #27AE60;  /* confirmações */
+
+  /* Bordas */
+  --color-rs-border:  rgba(200, 155, 60, 0.3);  /* borda dourada sutil */
+
+  /* Tipografia */
+  --font-ui:    "Inter", system-ui, sans-serif;
+  --font-title: "Rajdhani", "Inter", system-ui, sans-serif;
+}
+
+/* ── Reset base ─────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background-color: #0A0A0B;
+  color: #E8E0D0;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+}
+
+/* ── Scrollbar personalizada ─────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: #0A0A0B; }
+::-webkit-scrollbar-thumb  { background: rgba(200, 155, 60, 0.35); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(200, 155, 60, 0.65); }
+
+/* ── Animações utilitárias ───────────────────────────────────── */
+@keyframes pulse-gold {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-pulse-gold   { animation: pulse-gold 2s ease-in-out infinite; }
+.animate-slide-right  { animation: slide-in-right 0.25s ease-out; }
+.animate-fade-in      { animation: fade-in 0.2s ease-out; }

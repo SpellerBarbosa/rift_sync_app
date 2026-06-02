@@ -1,0 +1,11 @@
+{
+  "identifier": "overlay",
+  "description": "Permissões para a janela de overlay (flashcard) do RiftSync AI",
+  "windows": ["flashcard"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit"
+  ]
+}

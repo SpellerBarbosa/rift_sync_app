@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      # Injeta as chaves de API no .env para que o build as embutas no binário
+      - name: Create .env
+        run: |
+          echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" > src-tauri/.env
+          echo "SPELLCOACH_API_KEY=${{ secrets.SPELLCOACH_API_KEY }}" >> src-tauri/.env
+
+      - name: Build e publicar release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'RiftSync AI ${{ github.ref_name }}'
+          releaseBody: |
+            ## RiftSync AI ${{ github.ref_name }}
+
+            Baixe o instalador abaixo e execute `RiftSync-AI_*_x64-setup.exe`.
+
+            Usuários com versão anterior: o app atualiza automaticamente.
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true

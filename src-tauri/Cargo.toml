@@ -1,0 +1,90 @@
+[package]
+name = "riftsync-ai"
+version = "0.3.0"
+description = "RiftSync AI — Coach pessoal para League of Legends"
+authors = []
+edition = "2021"
+rust-version = "1.77.2"
+
+# Expõe a lógica como biblioteca para testes e mobile (padrão Tauri 2)
+[lib]
+name = "riftsync_ai_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# ── Build dependencies ───────────────────────────────────────
+[build-dependencies]
+tauri-build = { version = "2.1", features = [] }
+
+# ── Runtime dependencies ─────────────────────────────────────
+[dependencies]
+# Framework desktop — janelas transparentes, overlay, comandos
+tauri = { version = "2.1", features = [] }
+
+# Auto-update via GitHub Releases
+tauri-plugin-updater = "2"
+
+# Serialização JSON (commands Tauri, respostas API)
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Banco SQLite embutido — sem necessidade de instalar SQLite
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# HTTP client — LCU API (https localhost com cert bypass) + APIs externas
+reqwest = { version = "0.12", features = ["json", "native-tls"] }
+
+# WebSocket — canal de eventos em tempo real do LCU
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+native-tls        = "0.2"
+
+# Runtime assíncrono (exigido por reqwest/tungstenite)
+tokio = { version = "1", features = ["full"] }
+
+# Tratamento de erros ergonômico
+anyhow = "1"
+
+# Logging estruturado
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Diretórios de sistema (AppData, etc.)
+dirs = "5"
+
+# Codificação Base64 para autenticação Basic do LCU
+base64 = "0.22"
+
+# UUIDs para IDs únicos de alertas
+uuid = { version = "1", features = ["v4"] }
+
+# Traits Stream/Sink para o cliente WebSocket
+futures-util = "0.3"
+
+# Carrega variáveis do arquivo .env em desenvolvimento
+dotenvy = "0.15"
+
+# Timestamps para cooldowns e contexto dos alertas
+chrono = { version = "0.4", features = ["serde"] }
+
+# ── OCR (Fase 5) ─────────────────────────────────────────────
+# Captura de tela — funciona em windowed e borderless fullscreen
+xcap = "0.0.14"
+
+# Processamento de imagem: crop, scale, grayscale, threshold
+image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
+
+# Windows OCR embutido no Windows 10+ — sem instalação extra
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    # OCR embutido
+    "Media_Ocr",
+    "Graphics_Imaging",
+    "Storage_Streams",
+    # Detecção de janela do LoL + monitor correto
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+] }
+
+[features]
+# Necessário para builds de produção — não remover
+custom-protocol = ["tauri/custom-protocol"]

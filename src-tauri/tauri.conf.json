@@ -1,0 +1,103 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RiftSync AI",
+  "version": "0.3.0",
+  "identifier": "com.riftsync.ai",
+
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "RiftSync AI",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": false,
+        "transparent": false
+      },
+      {
+        "label": "flashcard",
+        "url": "overlay",
+        "title": "RiftSync Coach",
+        "width": 1920,
+        "height": 1080,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      },
+      {
+        "label": "rune_panel",
+        "url": "/rune-panel",
+        "title": "RiftSync — Runas",
+        "width": 320,
+        "height": 420,
+        "visible": false,
+        "transparent": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      },
+      {
+        "label": "build_panel",
+        "url": "/build-panel",
+        "title": "RiftSync — Build",
+        "width": 292,
+        "height": 390,
+        "visible": false,
+        "transparent": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+
+  "plugins": {
+    "updater": {
+      "pubkey": "TAURI_UPDATER_PUBKEY_PLACEHOLDER",
+      "endpoints": [
+        "https://github.com/SpellerBarbosa/riftsyncai/releases/latest/download/latest.json"
+      ],
+      "dialog": false
+    }
+  }
+}
