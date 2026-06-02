@@ -77,7 +77,6 @@ const champIconUrl = (key: string) =>
   `https://ddragon.leagueoflegends.com/cdn/${ddVersion.value}/img/champion/${key}.png`
 
 const MIN_GAMES_FOR_PATTERNS = 5
-const hasEnoughData = computed(() => (stats.value?.totalGames ?? 0) >= MIN_GAMES_FOR_PATTERNS)
 
 // ── Métricas de perfil ─────────────────────────────────────────
 const metrics = computed(() => {
