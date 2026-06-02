@@ -93,7 +93,7 @@
 
   "plugins": {
     "updater": {
-      "pubkey": "TAURI_UPDATER_PUBKEY_PLACEHOLDER",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI2REQ3RDYzQTYxMjFGODIKUldTQ0h4S21ZMzNkSmtMVjZ3L0lmU3l6UUtDcnZHRW9tcFh2QXpKdWdOK3k1Q3BNQjhXb01Xc0IK",
       "endpoints": [
         "https://github.com/SpellerBarbosa/riftsyncai/releases/latest/download/latest.json"
       ],
