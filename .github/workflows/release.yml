@@ -54,3 +54,10 @@ jobs:
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
+
+      - name: Upload instalador com nome fixo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $installer = Get-ChildItem "src-tauri\target\release\bundle\nsis\*_x64-setup.exe" | Select-Object -First 1
+          gh release upload ${{ github.ref_name }} "$($installer.FullName)#RiftSync-AI-setup.exe" --clobber

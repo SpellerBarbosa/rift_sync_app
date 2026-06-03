@@ -1,6 +1,6 @@
 [package]
 name = "riftsync-ai"
-version = "0.3.0"
+version = "0.3.2"
 description = "RiftSync AI — Coach pessoal para League of Legends"
 authors = []
 edition = "2021"

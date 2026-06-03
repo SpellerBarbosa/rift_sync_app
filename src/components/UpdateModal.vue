@@ -20,15 +20,8 @@ const progressLabel = computed(() => {
 })
 
 // ── API pública ───────────────────────────────────────────────
-const UPDATE_ENDPOINT = 'https://github.com/SpellerBarbosa/riftsyncai/releases/latest/download/latest.json'
-
 async function checkForUpdates() {
   try {
-    // Verifica se o endpoint existe antes de acionar o plugin
-    // Evita ERROR log do tauri_plugin_updater quando não há releases publicadas
-    const probe = await fetch(UPDATE_ENDPOINT, { method: 'HEAD' }).catch(() => null)
-    if (!probe?.ok) return
-
     const update = await check()
     if (!update?.available) return
 
