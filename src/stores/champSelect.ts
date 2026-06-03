@@ -159,56 +159,73 @@ export const useChampSelectStore = defineStore('champSelect', () => {
     }
   }
 
-  /** Abre a janela overlay de runas e carrega recomendação + build após lock-in. */
+  /** Abre a janela overlay de runas e carrega recomendação + build após lock-in.
+   *
+   * Separado em duas fases independentes para que falhas na recomendação
+   * não impeçam o build panel de receber o campeão:
+   *   1. get_champion_data  — obrigatório para ambos os painéis
+   *   2. get_pick_recommendation — apenas para rune_panel (pode falhar)
+   *   3. get_champion_build — fire-and-forget para build_panel
+   */
   async function loadRecommendation(championId: number, role: string) {
     isLoading.value = true
     showPanel.value = true
     recError.value  = null
     build.value     = null
 
-    // Sinaliza loading para as janelinhas antes de mostrar
     emit('rune_panel_loading').catch(() => {})
     invoke('show_rune_overlay').catch((e) => console.error('[ChampSelect] show_rune_overlay:', e))
 
+    // ── Fase 1: dados do campeão (necessário para ambos os painéis) ──
+    let champ: ChampionInfo | null = null
     try {
-      const [rec, champ] = await Promise.all([
-        invoke<PickRecommendation>('get_pick_recommendation', { championId, role }),
-        invoke<ChampionInfo>('get_champion_data', { id: championId }),
-      ])
+      champ = await invoke<ChampionInfo>('get_champion_data', { id: championId })
+      champion.value = champ
+    } catch (e) {
+      console.warn('[ChampSelect] get_champion_data falhou:', e)
+    }
+
+    // ── Fase 2: recomendação de runas (rune_panel) ───────────────────
+    try {
+      const rec = await invoke<PickRecommendation>('get_pick_recommendation', { championId, role })
       recommendation.value = rec
-      champion.value        = champ
-
-      // Envia dados de runas para a janelinha rune_panel
-      emit('rune_panel_data', { recommendation: rec, champion: champ }).catch(() => {})
-
-      // Busca build do banco (fire-and-forget se falhar)
-      if (champ?.name) {
-        invoke<{ championName: string; role: string; tier: string; runes: any; items: any; skills: any }>(
-          'get_champion_build',
-          { championName: champ.name }
-        ).then(raw => {
-          const resolved: ChampionBuild = {
-            championName: raw.championName,
-            role:         raw.role,
-            tier:         raw.tier,
-            runes:        raw.runes  ? JSON.parse(typeof raw.runes  === 'string' ? raw.runes  : JSON.stringify(raw.runes))  : null,
-            items:        raw.items  ? JSON.parse(typeof raw.items  === 'string' ? raw.items  : JSON.stringify(raw.items))  : null,
-            skills:       raw.skills ? JSON.parse(typeof raw.skills === 'string' ? raw.skills : JSON.stringify(raw.skills)) : null,
-          }
-          build.value = resolved
-          gameBuild.set(champ, resolved)
-          // Envia dados de build para a janelinha build_panel
-          emit('build_panel_data', { build: resolved, champion: champ }).catch(() => {})
-        }).catch((e) => console.warn('[ChampSelect] get_champion_build falhou:', e))
-      }
+      if (champ) emit('rune_panel_data', { recommendation: rec, champion: champ }).catch(() => {})
     } catch (e: any) {
       const msg = typeof e === 'string' ? e : (e?.message ?? String(e))
       recError.value = msg
       emit('rune_panel_error', msg).catch(() => {})
-      console.error('[ChampSelect] recomendação error:', msg)
+      console.warn('[ChampSelect] get_pick_recommendation falhou:', msg)
     } finally {
       isLoading.value = false
     }
+
+    // ── Fase 3: build do banco (build_panel) — fire-and-forget ───────
+    if (!champ?.name) {
+      // Campeão não disponível: notifica build panel com estado vazio
+      emit('build_panel_data', { build: null, champion: champ }).catch(() => {})
+      return
+    }
+
+    invoke<{ championName: string; role: string; tier: string; runes: any; items: any; skills: any }>(
+      'get_champion_build',
+      { championName: champ.name }
+    ).then(raw => {
+      const resolved: ChampionBuild = {
+        championName: raw.championName,
+        role:         raw.role,
+        tier:         raw.tier,
+        runes:   raw.runes   ? JSON.parse(typeof raw.runes   === 'string' ? raw.runes   : JSON.stringify(raw.runes))   : null,
+        items:   raw.items   ? JSON.parse(typeof raw.items   === 'string' ? raw.items   : JSON.stringify(raw.items))   : null,
+        skills:  raw.skills  ? JSON.parse(typeof raw.skills  === 'string' ? raw.skills  : JSON.stringify(raw.skills))  : null,
+      }
+      build.value = resolved
+      gameBuild.set(champ!, resolved)
+      emit('build_panel_data', { build: resolved, champion: champ }).catch(() => {})
+    }).catch((e) => {
+      console.warn('[ChampSelect] get_champion_build falhou:', e)
+      // Sem build no banco — ao menos mostra o campeão no painel
+      emit('build_panel_data', { build: null, champion: champ }).catch(() => {})
+    })
   }
 
   /** Fecha o painel e a janela overlay. */

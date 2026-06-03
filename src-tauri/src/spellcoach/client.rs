@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 
 const BASE_URL: &str = "https://spellcoachapiv2.vercel.app";
 
+/// Normaliza o nome do campeão para a API SpellCoach (remove espaços).
+/// "Lee Sin" → "LeeSin", "Twisted Fate" → "TwistedFate", "Master Yi" → "MasterYi".
+fn encode_name(name: &str) -> String {
+    name.replace(' ', "")
+}
+
 #[derive(Debug, Clone)]
 pub struct SpellCoachClient {
     http:    Client,
@@ -111,17 +117,24 @@ impl SpellCoachClient {
         Ok(Self { http, api_key })
     }
 
-    /// Busca TODOS os campeões de um role e tier percorrendo todas as páginas.
-    /// Usa page+limit se a API suportar; para quando recebe menos registros que o solicitado.
-    pub async fn get_champions(&self, role: &str, tier: &str) -> Result<Vec<ChampionData>> {
-        self.fetch_champions_all(
-            &format!("{BASE_URL}/api/champions?role={role}&tier={tier}"),
-        ).await
+    /// Busca TODOS os campeões sem filtro de role/tier (a API não suporta esses filtros).
+    /// Usa paginação limit=1000 — tipicamente 6 requests para ~5500 registros.
+    pub async fn get_all_champions(&self) -> Result<Vec<ChampionData>> {
+        self.fetch_champions_all(&format!("{BASE_URL}/api/champions")).await
     }
 
-    /// Busca todos os campeões sem filtro, percorrendo todas as páginas.
+    /// Busca campeões de um role e tier específicos.
+    /// Busca todos os dados de uma vez e filtra no cliente (API não suporta filtros).
+    pub async fn get_champions(&self, role: &str, tier: &str) -> Result<Vec<ChampionData>> {
+        let all = self.get_all_champions().await?;
+        Ok(all.into_iter()
+            .filter(|c| c.role.eq_ignore_ascii_case(role) && c.tier.eq_ignore_ascii_case(tier))
+            .collect())
+    }
+
+    /// Compat alias — usa get_all_champions internamente.
     async fn get_all_champions_page(&self) -> Result<Vec<ChampionData>> {
-        self.fetch_champions_all(&format!("{BASE_URL}/api/champions")).await
+        self.get_all_champions().await
     }
 
     /// Busca stats de um campeão específico pelo ID.
@@ -182,25 +195,29 @@ impl SpellCoachClient {
 
     /// Retorna apenas as runas de um campeão.
     pub async fn get_champion_runes(&self, champion_name: &str) -> Result<serde_json::Value> {
-        let url = format!("{BASE_URL}/api/builds/{champion_name}/runes");
+        let name = encode_name(champion_name);
+        let url = format!("{BASE_URL}/api/builds/{name}/runes");
         self.fetch_json(&url).await
     }
 
     /// Retorna itens e core builds de um campeão.
     pub async fn get_champion_items(&self, champion_name: &str) -> Result<serde_json::Value> {
-        let url = format!("{BASE_URL}/api/builds/{champion_name}/items");
+        let name = encode_name(champion_name);
+        let url = format!("{BASE_URL}/api/builds/{name}/items");
         self.fetch_json(&url).await
     }
 
     /// Retorna a ordem de habilidades de um campeão.
     pub async fn get_champion_skills(&self, champion_name: &str) -> Result<serde_json::Value> {
-        let url = format!("{BASE_URL}/api/builds/{champion_name}/skills");
+        let name = encode_name(champion_name);
+        let url = format!("{BASE_URL}/api/builds/{name}/skills");
         self.fetch_json(&url).await
     }
 
     /// Retorna os power spikes de um campeão.
     pub async fn get_champion_spikes(&self, champion_name: &str) -> Result<serde_json::Value> {
-        let url = format!("{BASE_URL}/api/builds/{champion_name}/spikes");
+        let name = encode_name(champion_name);
+        let url = format!("{BASE_URL}/api/builds/{name}/spikes");
         self.fetch_json(&url).await
     }
 
@@ -210,11 +227,12 @@ impl SpellCoachClient {
     /// Usa CHALLENGER por padrão — maior tier = melhor posicionamento.
     /// Fallback automático se a API não suportar o parâmetro.
     pub async fn get_champion_wards(&self, champion_name: &str) -> Result<serde_json::Value> {
-        let url = format!("{BASE_URL}/api/wards/{champion_name}?tier=CHALLENGER");
+        let name = encode_name(champion_name);
+        let url = format!("{BASE_URL}/api/wards/{name}?tier=CHALLENGER");
         match self.fetch_json(&url).await {
             Ok(v) => Ok(v),
             // Se a API não aceitar ?tier=, tenta sem o parâmetro
-            Err(_) => self.fetch_json(&format!("{BASE_URL}/api/wards/{champion_name}")).await,
+            Err(_) => self.fetch_json(&format!("{BASE_URL}/api/wards/{name}")).await,
         }
     }
 
@@ -281,11 +299,11 @@ impl SpellCoachClient {
     /// Percorre todas as páginas de campeões e retorna a lista completa.
     ///
     /// Estratégia de paginação:
-    ///   1. Solicita `?limit=500&page=N` — busca 500 por página
+    ///   1. Solicita `?limit=1000&page=N` — busca 1000 por página
     ///   2. Para quando `hasMore = false`, `total` atingido, ou página vazia
     ///   3. Se a API não suportar paginação, retorna o que a primeira página der
     async fn fetch_champions_all(&self, base_url: &str) -> Result<Vec<ChampionData>> {
-        const PAGE_SIZE: u64 = 500;
+        const PAGE_SIZE: u64 = 1000;
         const MAX_PAGES: u64 = 100; // proteção contra loop infinito
 
         let mut all: Vec<ChampionData> = Vec::new();

@@ -13,7 +13,7 @@ export const useGameBuildStore = defineStore('gameBuild', () => {
   const champion = ref<ChampionInfo | null>(null)
   const build    = ref<ChampionBuild | null>(null)
 
-  function set(champ: ChampionInfo, b: ChampionBuild) {
+  function set(champ: ChampionInfo, b: ChampionBuild | null) {
     champion.value = champ
     build.value    = b
   }

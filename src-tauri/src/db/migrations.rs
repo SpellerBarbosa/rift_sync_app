@@ -53,9 +53,33 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("004_champion_builds_wards", MIGRATION_004),
     ("005_wards_pk_role_tier",    MIGRATION_005),
     ("006_patterns_unique_player",MIGRATION_006),
+    ("007_coach_calibration",     MIGRATION_007),
 ];
 
 // ── SQL das migrações ────────────────────────────────────────
+
+/// Tabelas de calibração: log de dicas emitidas e pesos calculados por tip_id.
+const MIGRATION_007: &str = "
+CREATE TABLE IF NOT EXISTS coach_tip_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tip_id      TEXT    NOT NULL,
+    category    TEXT    NOT NULL,
+    game_time   INTEGER NOT NULL,
+    predicted   TEXT    NOT NULL,
+    outcome     TEXT,
+    logged_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_tip_log_pending
+    ON coach_tip_log(game_time) WHERE outcome IS NULL;
+
+CREATE TABLE IF NOT EXISTS coach_tip_weights (
+    tip_id       TEXT    PRIMARY KEY,
+    accuracy     REAL    NOT NULL DEFAULT 0.5,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+";
 
 /// Adiciona UNIQUE(player_id) em player_patterns para suportar upsert direto.
 /// Recria a tabela preservando os dados existentes.

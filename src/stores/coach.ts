@@ -68,50 +68,117 @@ export const useCoachStore = defineStore('coach', () => {
     return _isVoiceWindow
   }
 
-  // ── TTS — chama API e toca áudio com proteção contra sobreposição ──
+  // ── Normaliza texto antes de enviar ao TTS ───────────────────
+  // Corrige abreviações e símbolos que o TTS lê de forma estranha.
+  function normalizeTts(text: string): string {
+    return text
+      // "30s" → "30 segundos" | "30 s" → "30 segundos"
+      .replace(/\b(\d+)\s*s\b/gi, '$1 segundos')
+      // "1min" / "2min" → "1 minuto" / "2 minutos"
+      .replace(/\b(\d+)\s*min\b/gi, (_, n) => `${n} ${n === '1' ? 'minuto' : 'minutos'}`)
+      // "km/h", "m/s" — lê mal; substitui por forma escrita
+      .replace(/\bkm\/h\b/gi, 'quilômetros por hora')
+  }
+
+  // ── Divide texto em segmentos para síntese paralela ──────────
+  // Regra 1: separa em `.!?` (sentenças)
+  // Regra 2: dentro de cada sentença longa (>40 chars), separa em `,`
+  // Isso garante que nenhum segmento fique longo demais e "embole" no TTS.
+  function splitSentences(text: string): string[] {
+    const primary = text
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length >= 2)
+
+    const result: string[] = []
+    for (const seg of primary) {
+      if (seg.length > 40 && seg.includes(',')) {
+        const parts = seg.split(/,\s+/)
+          .map(s => s.trim())
+          .filter(s => s.length >= 3)
+        result.push(...parts)
+      } else {
+        result.push(seg)
+      }
+    }
+    return result
+  }
+
+  const PAUSE_BETWEEN_SEGMENTS_MS = 350
+
+  // ── TTS — queue que não corta o áudio atual ──────────────────
   //
-  // Problema resolvido: speak() é async mas o dismiss timer não espera.
-  // Se o áudio demora a carregar (cache miss, rede lenta), pode chegar
-  // depois que o próximo card já começou e tocar por cima.
-  //
-  // Solução: token de geração. Cada speak() incrementa speakGen e captura
-  // o valor em myGen. Quando o áudio finalmente carrega, compara myGen
-  // com speakGen — se divergirem, um card mais novo já assumiu → descarta.
+  // Fluxo:
+  //   • Se não está tocando → começa imediatamente
+  //   • Se está tocando     → salva como pendente (substitui anterior)
+  //   • Ao terminar cada dica → toca a pendente se houver
+  //   • speakGen permite parar tudo (mute / saída de jogo)
+  let isSpeaking  = false
+  let pendingText: string | null = null
+
   function speak(text: string) {
     if (!isVoiceEnabled.value || isMuted.value) return
     if (!isVoiceWindow()) return
-
     const settings = useSettingsStore()
     if (!settings.coachEnabled) return
 
-    // Para o áudio atual imediatamente (novo card = novo áudio)
-    if (currentAudio) {
-      currentAudio.pause()
-      currentAudio.src = ''
-      currentAudio = null
+    if (isSpeaking) {
+      pendingText = text   // guarda como próxima (substitui anterior pendente)
+      return
     }
 
-    const myGen = ++speakGen
+    doSpeak(text)
+  }
 
-    ;(async () => {
-      try {
-        const dataUrl = await invoke<string>('speak_tts', {
-          text,
+  async function doSpeak(rawText: string) {
+    isSpeaking = true
+    const myGen   = ++speakGen
+    const settings = useSettingsStore()
+    const segments = splitSentences(normalizeTts(rawText))
+
+    try {
+      // Dispara geração de TODOS os segmentos em paralelo
+      const pending = segments.map(seg =>
+        invoke<string>('speak_tts', {
+          text:  seg,
           voice: settings.ttsVoice,
+          speed: settings.ttsSpeed,
+        }).catch(() => null)
+      )
+
+      // Toca em ordem, com pausa de 350ms entre segmentos
+      for (let i = 0; i < pending.length; i++) {
+        if (myGen !== speakGen) break   // mute/stop acionado
+
+        const dataUrl = await pending[i]
+        if (!dataUrl || myGen !== speakGen) break
+
+        const isLast = i === pending.length - 1
+
+        await new Promise<void>((resolve) => {
+          const audio  = new Audio(dataUrl)
+          audio.volume = settings.ttsVolume
+          currentAudio = audio
+          audio.onended = () => {
+            if (currentAudio === audio) currentAudio = null
+            if (isLast) resolve()
+            else setTimeout(resolve, PAUSE_BETWEEN_SEGMENTS_MS)
+          }
+          audio.onerror = () => resolve()
+          audio.play().catch(() => resolve())
         })
-
-        // Outro card foi ativado enquanto esse carregava → descarta
-        if (myGen !== speakGen) return
-
-        const audio  = new Audio(dataUrl)
-        audio.volume = settings.ttsVolume
-        currentAudio = audio
-        audio.onended = () => { if (currentAudio === audio) currentAudio = null }
-        await audio.play()
-      } catch (e) {
-        console.warn('[TTS] falha:', e)
       }
-    })()
+    } catch (e) {
+      console.warn('[TTS] falha:', e)
+    } finally {
+      isSpeaking = false
+      // Toca a dica que chegou enquanto esta estava rodando
+      if (pendingText && myGen === speakGen) {
+        const next = pendingText
+        pendingText = null
+        doSpeak(next)
+      }
+    }
   }
 
   // ── Fila de flashcards ──────────────────────────────────────
@@ -145,6 +212,10 @@ export const useCoachStore = defineStore('coach', () => {
     // Deduplicação: mesma mensagem ativa ou na fila → descarta
     if (activeCard.value?.message === alert.message) return
     if (cardQueue.value.some(c => c.message === alert.message)) return
+
+    // Cap de fila: máximo 2 pendentes para não spammar em rajada.
+    // CRITICAL sempre entra (pode substituir o início da fila se cheia).
+    if (cardQueue.value.length >= 2 && alert.severity !== 'CRITICAL') return
 
     if (alert.severity === 'CRITICAL') {
       cardQueue.value.unshift(alert)

@@ -66,7 +66,7 @@ pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "riftsync_ai_lib=debug,warn".into()),
+                .unwrap_or_else(|_| "riftsync_ai_lib=debug,tauri_plugin_updater=off,warn".into()),
         )
         .init();
 
@@ -151,26 +151,22 @@ pub fn run() {
             // Sincroniza meta stats no startup e repete a cada 6h.
             // O delay inicial de 8s evita contention com o setup do LCU.
             if let Some(sc_client) = &app.state::<AppState>().spellcoach_client {
-                let db_sync   = Arc::clone(&db);
+                let db_sync     = Arc::clone(&db);
                 let client_sync = Arc::clone(sc_client);
+                let app_sync    = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     const SIX_HOURS: tokio::time::Duration =
                         tokio::time::Duration::from_secs(6 * 60 * 60);
 
                     tokio::time::sleep(tokio::time::Duration::from_secs(8)).await;
                     loop {
-                        tracing::info!("SpellCoach: iniciando sync automático de meta stats…");
-                        match spellcoach::sync::sync_all_meta_stats(
+                        tracing::info!("SpellCoach: iniciando sync automático (meta + builds)…");
+                        let (ok, err) = spellcoach::sync::full_sync_with_progress(
                             Arc::clone(&db_sync),
                             Arc::clone(&client_sync),
-                        )
-                        .await
-                        {
-                            Ok((ok, err)) => tracing::info!(
-                                "SpellCoach sync: {ok} registros, {err} erros"
-                            ),
-                            Err(e) => tracing::warn!("SpellCoach sync falhou: {e}"),
-                        }
+                            &app_sync,
+                        ).await;
+                        tracing::info!("SpellCoach auto-sync: {ok} ok, {err} erros");
                         tokio::time::sleep(SIX_HOURS).await;
                     }
                 });
@@ -295,10 +291,12 @@ pub fn run() {
             commands::coach::get_post_game_data,
             commands::coach::analyze_post_game,
             commands::coach::analyze_player_profile_command,
+            commands::coach::get_dashboard_analysis,
             commands::coach::debug_fire_replay,
             commands::coach::debug_fire_ward,
             commands::coach::speak_tts,
             commands::coach::warm_up_tts,
+            commands::coach::list_tts_voices,
             // player (extended)
             commands::player::get_player_patterns,
             commands::player::compute_player_patterns,

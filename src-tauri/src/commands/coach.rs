@@ -3,14 +3,17 @@
 // ============================================================
 
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
-
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 
 use crate::db::models::{CoachingSession, PlayerPattern};
 use crate::AppState;
+
+/// Endpoint Piper TTS — stream de áudio
+const TTS_API_HF: &str = "https://spell2014-riftsyncai.hf.space/tts/stream";
 
 // ── Structs do pós-game ───────────────────────────────────────
 
@@ -41,131 +44,131 @@ pub struct PostGameAnalysis {
     pub focus:        String,
 }
 
-const TTS_API: &str = "https://spell2014-riftsyncai.hf.space/tts";
-
 // ── Helpers internos ──────────────────────────────────────────
 
-/// Chama a API TTS e retorna o data URL base64.
-/// Usa o cliente HTTP do cache (criado uma vez, reutilizado).
-async fn fetch_tts(
-    text:  &str,
-    voice: &str,
-    state: &State<'_, AppState>,
-) -> Result<String, String> {
-    let client = {
-        let cache = state.tts_cache.lock().await;
-        cache.client.clone()  // reqwest::Client é Clone barato (Arc interno)
-    };
+/// Roteia a síntese de voz:
+///   • Vozes Piper TTS (pt_BR-*, en_US-*) → HuggingFace API
+///   • Demais → Windows SpeechSynthesizer via PowerShell
+async fn synthesize_tts(text: &str, voice: &str, speed: f32, state: &State<'_, AppState>) -> Result<String, String> {
+    if voice.starts_with("pt_BR-") || voice.starts_with("en_US-")
+    || voice.starts_with("pf_") || voice.starts_with("pm_")
+    || voice.starts_with("af_") || voice.starts_with("am_") {
+        fetch_tts_hf(text, voice, speed, state).await
+    } else {
+        let t = text.to_string();
+        let v = voice.to_string();
+        tokio::task::spawn_blocking(move || crate::tts::winrt::synthesize_blocking(t, v))
+            .await
+            .map_err(|e| format!("Thread TTS gerou panic: {e}"))?
+            .map_err(|e| format!("TTS falhou: {e}"))
+    }
+}
 
-    let resp = client
-        .post(TTS_API)
-        .json(&serde_json::json!({ "text": text, "voice": voice }))
-        .send()
-        .await
-        .map_err(|e| format!("TTS API offline: {e}"))?;
+/// Chama a API Piper TTS com retry automático em 408 (cold start).
+async fn fetch_tts_hf(text: &str, voice: &str, speed: f32, state: &State<'_, AppState>) -> Result<String, String> {
+    let client = { state.tts_cache.lock().await.client.clone() };
+    let delays  = [0u64, 20, 35];
 
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("audio/wav")
-        .split(';')
-        .next()
-        .unwrap_or("audio/wav")
-        .trim()
-        .to_string();
+    for (attempt, &delay) in delays.iter().enumerate() {
+        if delay > 0 {
+            tracing::info!("[TTS HF] Space acordando — aguardando {delay}s (tentativa {})", attempt + 1);
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+        }
 
-    if !resp.status().is_success() {
-        return Err(format!("TTS retornou {}", resp.status()));
+        let resp = match client
+            .post(TTS_API_HF)
+            .json(&serde_json::json!({ "text": text, "voice": voice, "speed": speed }))
+            .send()
+            .await
+        {
+            Ok(r)  => r,
+            Err(e) => return Err(format!("TTS API offline: {e}")),
+        };
+
+        if resp.status() == reqwest::StatusCode::REQUEST_TIMEOUT {
+            tracing::warn!("[TTS HF] 408 — Space dormindo, tentativa {}/{}", attempt + 1, delays.len());
+            if attempt + 1 < delays.len() { continue; }
+            return Err("TTS indisponível — Space demorando para acordar, tente em segundos".to_string());
+        }
+
+        if !resp.status().is_success() {
+            return Err(format!("TTS retornou {}", resp.status()));
+        }
+
+        let ct = resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("audio/wav")
+            .split(';').next().unwrap_or("audio/wav")
+            .trim()
+            .to_string();
+
+        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+        return Ok(format!("data:{};base64,{}", ct, B64.encode(&bytes)));
     }
 
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    Ok(format!("data:{};base64,{}", content_type, B64.encode(&bytes)))
+    Err("TTS indisponível após múltiplas tentativas".to_string())
+}
+
+/// Retorna lista de vozes instaladas no Windows (para debug/seleção no frontend).
+#[tauri::command]
+pub async fn list_tts_voices() -> Result<Vec<serde_json::Value>, String> {
+    tokio::task::spawn_blocking(crate::tts::winrt::list_system_voices)
+        .await
+        .map_err(|e| format!("Thread falhou: {e}"))?
+        .map_err(|e| format!("Falha ao listar vozes: {e}"))
+        .map(|voices| {
+            voices.into_iter().map(|(id, name, locale)| {
+                serde_json::json!({ "id": id, "name": name, "locale": locale })
+            }).collect()
+        })
 }
 
 // ── Commands públicos ─────────────────────────────────────────
 
 /// Retorna o data URL de áudio para um texto — verifica o cache antes
-/// de chamar a API. Cache hit = zero latência de rede.
+/// de sintetizar. Cache hit = resposta instantânea sem re-síntese.
 ///
 /// Fluxo:
 ///   1. lock(cache) → get(text, voice) → Some(url) → retorna imediatamente
-///   2. None → fetch_tts (rede) → lock(cache).insert → retorna url
+///   2. None → synthesize_tts (WinRT) → lock(cache).insert → retorna url
 #[tauri::command]
 pub async fn speak_tts(
     text:  String,
     voice: String,
+    speed: Option<f32>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    let speed = speed.unwrap_or(1.0).clamp(0.5, 2.0);
+
+    // Cache key inclui speed para que mudanças de velocidade não sirvam áudio errado
+    let cache_key = format!("{voice}|{speed:.2}|{text}");
+
     // 1. Cache hit
     {
         let mut cache = state.tts_cache.lock().await;
-        if let Some(url) = cache.get(&text, &voice) {
+        if let Some(url) = cache.get(&cache_key, "") {
             return Ok(url);
         }
     }
 
-    // 2. Cache miss — busca na API
-    tracing::debug!("[TTS] MISS → API {:.60}", text);
-    let data_url = fetch_tts(&text, &voice, &state).await?;
+    // 2. Cache miss — roteia para HF Piper ou Windows TTS
+    let is_hf = voice.starts_with("pt_BR-") || voice.starts_with("en_US-")
+             || voice.starts_with("pf_")    || voice.starts_with("pm_")
+             || voice.starts_with("af_")    || voice.starts_with("am_");
+    tracing::debug!("[TTS] MISS → {} speed={:.2} '{:.60}'", if is_hf { "HF Piper" } else { "Win" }, speed, text);
+    let data_url = synthesize_tts(&text, &voice, speed, &state).await?;
 
-    // 3. Armazena no cache (lock separado para não segurar durante a rede)
-    state.tts_cache.lock().await.insert(&text, &voice, data_url.clone());
+    // 3. Armazena no cache
+    state.tts_cache.lock().await.insert(&cache_key, "", data_url.clone());
 
     Ok(data_url)
 }
 
-/// Acorda o HuggingFace Space TTS em background (fire-and-forget).
-/// Também pré-aquece o cache com a frase de wake-up para que a próxima
-/// chamada real seja instantânea.
+/// WinRT TTS é local — não precisa de warm-up.
+/// Mantido por compatibilidade com o frontend que o chama.
 #[tauri::command]
-pub async fn warm_up_tts(voice: String, state: State<'_, AppState>) -> Result<(), String> {
-    // Verifica se o cache já tem a resposta de warm-up (não chamar duas vezes)
-    let already_warm = {
-        let mut cache = state.tts_cache.lock().await;
-        cache.get("ok", &voice).is_some()
-    };
-    if already_warm {
-        tracing::debug!("[TTS] warm-up já em cache — ignorado.");
-        return Ok(());
-    }
-
-    let state_arc = state.tts_cache.clone();
-    tauri::async_runtime::spawn(async move {
-        // Cria um AppState temporário apenas para fetch_tts não é possível,
-        // então chamamos a API diretamente aqui.
-        let client = {
-            let c = state_arc.lock().await;
-            c.client.clone()
-        };
-
-        match client
-            .post(TTS_API)
-            .json(&serde_json::json!({ "text": "ok", "voice": voice }))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                let ct = resp
-                    .headers()
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("audio/wav")
-                    .split(';').next().unwrap_or("audio/wav")
-                    .trim()
-                    .to_string();
-
-                if let Ok(bytes) = resp.bytes().await {
-                    let url = format!("data:{};base64,{}", ct, B64.encode(&bytes));
-                    state_arc.lock().await.insert("ok", &voice, url);
-                    tracing::info!("[TTS] warm-up concluído e cacheado.");
-                }
-            }
-            Ok(resp) => tracing::warn!("[TTS] warm-up retornou {}", resp.status()),
-            Err(e)   => tracing::warn!("[TTS] warm-up falhou: {e}"),
-        }
-    });
-
+pub async fn warm_up_tts(_voice: String, _state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
@@ -310,6 +313,16 @@ pub async fn analyze_post_game(
         .ok_or("Análise IA não configurada")?
         .clone();
 
+    // Lê idioma configurado pelo usuário
+    let language = {
+        let db = state.db.lock().await;
+        db.query_row(
+            "SELECT value FROM settings WHERE key = 'app_language'",
+            [],
+            |row| row.get::<_, String>(0),
+        ).unwrap_or_else(|_| "pt-BR".to_string())
+    };
+
     // Busca dados direto do banco (sem reusar o command para evitar State aninhado)
     let (match_id, champion_name, role, result, kills, deaths, assists, cs_per_min, vision_score, duration) = {
         let db = state.db.lock().await;
@@ -420,6 +433,7 @@ pub async fn analyze_post_game(
         &alerts_text,
         &pattern_text,
         &recent_matches,
+        &language,
     ).await.map_err(|e| format!("Erro ao chamar IA: {e}"))?;
 
     let content = body["choices"][0]["message"]["content"]
@@ -440,6 +454,15 @@ pub async fn analyze_player_profile_command(
     let groq = state.groq_client.as_ref()
         .ok_or("Análise IA não configurada")?
         .clone();
+
+    let language = {
+        let db = state.db.lock().await;
+        db.query_row(
+            "SELECT value FROM settings WHERE key = 'app_language'",
+            [],
+            |row| row.get::<_, String>(0),
+        ).unwrap_or_else(|_| "pt-BR".to_string())
+    };
 
     let pattern = {
         let db = state.db.lock().await;
@@ -465,8 +488,68 @@ pub async fn analyze_player_profile_command(
         ).map_err(|_| "Sem dados comportamentais — jogue mais partidas com o RiftSync ativo")?
     };
 
-    groq.analyze_player_profile(&pattern, &summary).await
+    groq.analyze_player_profile(&pattern, &summary, &language).await
         .map_err(|e| format!("Erro na análise de perfil: {e}"))
+}
+
+/// Análise do dashboard: recebe resumo das últimas partidas + role e retorna insights.
+/// Usa player_patterns se disponível; caso contrário usa valores neutros.
+/// Retorna o mesmo tipo PlayerInsights (camelCase → DashboardAnalysis no frontend).
+#[tauri::command]
+pub async fn get_dashboard_analysis(
+    matches_summary: String,
+    role:            Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::groq::client::PlayerInsights, String> {
+    let groq = state.groq_client.as_ref()
+        .ok_or("GROQ_API_KEY não configurada — adicione ao .env para análises com IA.")?
+        .clone();
+
+    let language = {
+        let db = state.db.lock().await;
+        db.query_row(
+            "SELECT value FROM settings WHERE key = 'app_language'",
+            [],
+            |row| row.get::<_, String>(0),
+        ).unwrap_or_else(|_| "pt-BR".to_string())
+    };
+
+    // Tenta ler padrões comportamentais; usa zeros se ainda não houver dados suficientes
+    let pattern = {
+        let db = state.db.lock().await;
+        db.query_row(
+            "SELECT id, player_id, aggression_score, deaths_without_vision, avg_deaths_10_15,
+                    lane_dominance, objective_control, roam_frequency, tp_efficiency, ward_score
+             FROM player_patterns
+             WHERE player_id = (SELECT id FROM players ORDER BY updated_at DESC LIMIT 1)
+             LIMIT 1",
+            [],
+            |row| Ok(PlayerPattern {
+                id:                    row.get(0)?,
+                player_id:             row.get(1)?,
+                aggression_score:      row.get(2)?,
+                deaths_without_vision: row.get(3)?,
+                avg_deaths_10_15:      row.get(4)?,
+                lane_dominance:        row.get(5)?,
+                objective_control:     row.get(6)?,
+                roam_frequency:        row.get(7)?,
+                tp_efficiency:         row.get(8)?,
+                ward_score:            row.get(9)?,
+            }),
+        ).unwrap_or_else(|_| PlayerPattern {
+            id: 0, player_id: 0,
+            aggression_score: 0.5, deaths_without_vision: 0,
+            avg_deaths_10_15: 0.0, lane_dominance: 0.5,
+            objective_control: 0.5, roam_frequency: 0.5,
+            tp_efficiency: 0.5, ward_score: 0.5,
+        })
+    };
+
+    let role_str = role.as_deref().unwrap_or("não informado");
+    let summary  = format!("Role: {role_str}\n{matches_summary}");
+
+    groq.analyze_player_profile(&pattern, &summary, &language).await
+        .map_err(|e| format!("Erro na análise do dashboard: {e}"))
 }
 
 /// Dispara uma sequência de alertas de teste para verificar flashcards + TTS + WardOverlay.

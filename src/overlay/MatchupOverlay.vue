@@ -187,11 +187,11 @@ function spellIcon(spellName: string): string {
 
 <template>
   <!-- Overlay visível apenas quando o oponente for identificado -->
-  <div class="min-h-screen bg-transparent p-3 pointer-events-none select-none">
+  <div class="bg-transparent p-3 pointer-events-none select-none" style="width:100%;height:100%">
     <Transition name="slide-in">
       <div
         v-if="enemyName"
-        class="fixed right-3 top-3 w-60"
+        class="w-full"
         :class="{ 'spike-pulse': spikeFlash }"
       >
         <div

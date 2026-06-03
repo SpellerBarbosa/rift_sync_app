@@ -22,7 +22,7 @@ const gameState = useGameStateStore()
 const collapsed = ref(false)
 
 const visible = computed(() =>
-  gameState.phase === 'INGAME' && !!gameBuild.build
+  gameState.phase === 'INGAME' && !!gameBuild.champion
 )
 
 // ── DDragon ──────────────────────────────────────────────────

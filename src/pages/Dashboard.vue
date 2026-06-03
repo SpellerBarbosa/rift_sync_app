@@ -1,12 +1,41 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
-import { usePlayerStore }    from '../stores/player'
-import { useGameStateStore } from '../stores/gameState'
-import { useDashboardStore } from '../stores/dashboard'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
+import { listen, type UnlistenFn }  from '@tauri-apps/api/event'
+import { usePlayerStore }           from '../stores/player'
+import { useGameStateStore }        from '../stores/gameState'
+import { useDashboardStore }        from '../stores/dashboard'
 
 const playerStore    = usePlayerStore()
 const gameStateStore = useGameStateStore()
 const dash           = useDashboardStore()
+
+// ── Progresso de sincronização SpellCoach ─────────────────────
+interface SyncProgress { phase: string; current: number; total: number; label: string }
+
+const syncProgress = ref<SyncProgress | null>(null)
+let   unlistenSync: UnlistenFn | null = null
+
+onMounted(async () => {
+  unlistenSync = await listen<SyncProgress>('sync_progress', (e) => {
+    syncProgress.value = e.payload.phase === 'done' ? null : e.payload
+  })
+})
+
+onUnmounted(() => { unlistenSync?.() })
+
+const syncLabel = computed(() => {
+  const p = syncProgress.value
+  if (!p) return ''
+  if (p.phase === 'meta_stats') return `Sincronizando meta... ${p.current}/${p.total}`
+  if (p.phase === 'builds')     return `Builds: ${p.label} (${p.current}/${p.total})`
+  return p.label
+})
+
+const syncPct = computed(() => {
+  const p = syncProgress.value
+  if (!p || p.total === 0) return 0
+  return Math.round((p.current / p.total) * 100)
+})
 
 function championIcon(key: string): string {
   if (!key) return ''
@@ -20,8 +49,15 @@ function onImgError(e: Event) {
   if (fallback) fallback.style.display = 'flex'
 }
 
+async function syncFromLcu() {
+  await playerStore.fetchCurrentPlayer()
+  await dash.syncAll()
+  if (dash.stats?.topChampions.length) dash.fetchMetaStats()
+  if (dash.matches.length > 0) dash.fetchAnalysis(playerStore.currentPlayer?.role)
+}
+
 onMounted(async () => {
-  // Carrega dados em cache sem esperar pela LCU
+  // 1. Carrega cache local imediatamente (resposta rápida sem LCU)
   await Promise.all([
     playerStore.fetchLastPlayer(),
     dash.fetchCachedMatches(),
@@ -29,19 +65,16 @@ onMounted(async () => {
   ])
   if (dash.stats?.topChampions.length) dash.fetchMetaStats()
   if (dash.matches.length > 0) dash.fetchAnalysis(playerStore.currentPlayer?.role)
+
+  // 2. Se o LoL já estava online quando o dashboard abriu, sincroniza na hora
+  //    (o watch só captura a transição false→true, não o estado já ativo)
+  if (gameStateStore.isLolRunning) {
+    syncFromLcu()
+  }
 })
 
-watch(() => gameStateStore.isLolRunning, async (running) => {
-  if (running) {
-    await playerStore.fetchCurrentPlayer()
-    await dash.syncAll()
-    if (dash.stats?.topChampions.length) {
-      dash.fetchMetaStats()
-    }
-    if (dash.matches.length > 0) {
-      dash.fetchAnalysis(playerStore.currentPlayer?.role)
-    }
-  }
+watch(() => gameStateStore.isLolRunning, (running) => {
+  if (running) syncFromLcu()
 })
 
 
@@ -110,23 +143,35 @@ function winrateColor(wr: number) {
         </div></div>
         <div v-else-if="playerStore.isLoading" class="player-card-skeleton" />
         <div v-else class="player-card-frame"><div class="player-card player-card--empty">
-          <p class="text-rs-white/20 text-xs tracking-widest">Sem dados de jogador</p>
+          <p class="text-rs-white/20 text-xs tracking-widest">{{ $t('dashboard.noPlayerData') }}</p>
         </div></div>
 
         <div class="lcu-badge" :class="gameStateStore.isLolRunning ? 'badge-on' : 'badge-off'">
           <div class="badge-dot" :class="gameStateStore.isLolRunning ? 'dot-on' : 'dot-off'" />
-          {{ gameStateStore.isLolRunning ? 'Online' : 'Offline' }}
+          {{ gameStateStore.isLolRunning ? $t('dashboard.online') : $t('dashboard.offline') }}
         </div>
 
       </header>
 
+      <!-- ── Sync progress ─────────────────────────────────── -->
+      <Transition name="sync-fade">
+        <div v-if="syncProgress" class="sync-bar">
+          <div class="sync-spinner" />
+          <span class="sync-label">{{ syncLabel }}</span>
+          <div class="sync-track">
+            <div class="sync-fill" :style="{ width: syncPct + '%' }" />
+          </div>
+          <span class="sync-pct">{{ syncPct }}%</span>
+        </div>
+      </Transition>
+
       <!-- ── Stats row ──────────────────────────────────── -->
       <div class="stats-row">
         <div class="stat-card" v-for="stat in [
-          { label: 'Partidas',  value: dash.stats?.totalGames ?? '—',               color: '' },
-          { label: 'Winrate',   value: dash.stats ? dash.stats.winrate + '%' : '—', color: dash.stats ? winrateColor(dash.stats.winrate) : '' },
-          { label: 'KDA Médio', value: dash.stats?.avgKda ?? '—',                   color: '' },
-          { label: 'CS Médio',  value: dash.stats?.avgCs  ?? '—',                   color: '' },
+          { label: $t('dashboard.stats.matches'), value: dash.stats?.totalGames ?? '—',               color: '' },
+          { label: $t('dashboard.stats.winrate'), value: dash.stats ? dash.stats.winrate + '%' : '—', color: dash.stats ? winrateColor(dash.stats.winrate) : '' },
+          { label: $t('dashboard.stats.avgKda'),  value: dash.stats?.avgKda ?? '—',                   color: '' },
+          { label: $t('dashboard.stats.avgCs'),   value: dash.stats?.avgCs  ?? '—',                   color: '' },
         ]" :key="stat.label">
           <p class="stat-value" :class="stat.color || 'text-rs-gold/80'">{{ stat.value }}</p>
           <p class="stat-label">{{ stat.label }}</p>
@@ -139,7 +184,7 @@ function winrateColor(wr: number) {
         <!-- ── Últimas Partidas ────────────────────────── -->
         <section class="grid-col">
           <h2 class="section-title">
-            <span class="title-diamond" />Últimas Partidas
+            <span class="title-diamond" />{{ $t('dashboard.recentMatches') }}
           </h2>
 
           <div v-if="dash.loadingMatches" class="flex flex-col gap-1.5">
@@ -184,7 +229,7 @@ function winrateColor(wr: number) {
 
               <!-- Result badge -->
               <span class="match-badge" :class="m.win ? 'badge-win' : 'badge-loss'">
-                {{ m.win ? 'V' : 'D' }}
+                {{ m.win ? $t('dashboard.win') : $t('dashboard.loss') }}
               </span>
 
               <!-- Meta -->
@@ -197,9 +242,9 @@ function winrateColor(wr: number) {
           </div>
 
           <div v-else class="empty-col">
-            <p class="text-rs-white/25 text-xs leading-relaxed text-center">
-              Abra o League of Legends para<br>carregar suas partidas automaticamente.
-            </p>
+            <i18n-t keypath="dashboard.emptyMatches" tag="p" class="text-rs-white/25 text-xs leading-relaxed text-center">
+              <template #br><br /></template>
+            </i18n-t>
           </div>
         </section>
 
@@ -208,7 +253,7 @@ function winrateColor(wr: number) {
         <!-- ── Campeões + Análise ──────────────────────── -->
         <section class="grid-col">
 
-          <h2 class="section-title"><span class="title-diamond" />Campeões Mais Jogados</h2>
+          <h2 class="section-title"><span class="title-diamond" />{{ $t('dashboard.topChampions') }}</h2>
 
           <div v-if="dash.stats?.topChampions.length" class="flex flex-col gap-2 mb-4">
             <div v-for="c in dash.stats.topChampions" :key="c.name" class="champ-row">
@@ -252,14 +297,14 @@ function winrateColor(wr: number) {
                   <span class="meta-patch ml-auto">{{ dash.metaStats.get(c.id)!.patch }}</span>
                 </div>
                 <div v-else-if="dash.loadingMeta" class="meta-row">
-                  <span class="meta-loading">carregando meta...</span>
+                  <span class="meta-loading">{{ $t('dashboard.loadingMeta') }}</span>
                 </div>
               </div>
             </div>
           </div>
 
           <div v-else-if="!dash.loadingStats" class="mb-4">
-            <p class="text-rs-white/20 text-xs">Sem dados de campeões ainda.</p>
+            <p class="text-rs-white/20 text-xs">{{ $t('dashboard.noChampionData') }}</p>
           </div>
 
           <!-- Separator -->
@@ -268,16 +313,16 @@ function winrateColor(wr: number) {
           </div>
 
           <!-- Análise IA -->
-          <h2 class="section-title mb-3"><span class="title-diamond" />Análise de Desempenho</h2>
+          <h2 class="section-title mb-3"><span class="title-diamond" />{{ $t('dashboard.performanceAnalysis') }}</h2>
 
           <div v-if="dash.loadingAnalysis" class="flex items-center gap-2 py-2">
             <div class="w-1.5 h-1.5 rounded-full bg-rs-gold animate-pulse" />
-            <span class="text-rs-gold/45 text-xs tracking-wider">Analisando com IA...</span>
+            <span class="text-rs-gold/45 text-xs tracking-wider">{{ $t('dashboard.analyzingAi') }}</span>
           </div>
 
           <div v-else-if="dash.analysis" class="flex flex-col gap-4">
             <div>
-              <p class="insight-header text-rs-success/65">Pontos Fortes</p>
+              <p class="insight-header text-rs-success/65">{{ $t('dashboard.strengths') }}</p>
               <ul class="mt-1.5 flex flex-col gap-1">
                 <li v-for="s in dash.analysis.strengths" :key="s" class="insight-item">
                   <span class="bullet bg-rs-success/60" />
@@ -286,7 +331,7 @@ function winrateColor(wr: number) {
               </ul>
             </div>
             <div>
-              <p class="insight-header text-rs-gold/65">Pontos de Melhoria</p>
+              <p class="insight-header text-rs-gold/65">{{ $t('dashboard.weaknesses') }}</p>
               <ul class="mt-1.5 flex flex-col gap-1">
                 <li v-for="w in dash.analysis.weaknesses" :key="w" class="insight-item">
                   <span class="bullet bg-rs-gold/60" />
@@ -295,17 +340,17 @@ function winrateColor(wr: number) {
               </ul>
             </div>
             <div class="priority-box">
-              <p class="priority-label">Foco Prioritário</p>
+              <p class="priority-label">{{ $t('dashboard.priorityFocus') }}</p>
               <p class="text-rs-white/80 text-sm leading-relaxed">{{ dash.analysis.priorityTip }}</p>
             </div>
           </div>
 
           <div v-else-if="!dash.loadingAnalysis" class="py-2">
-            <p v-if="dash.analysisError?.includes('GROQ_API_KEY')" class="text-rs-white/20 text-xs leading-relaxed">
-              Adicione <span class="font-mono text-rs-gold/40">GROQ_API_KEY</span> ao .env para análises com IA.
-            </p>
+            <i18n-t v-if="dash.analysisError?.includes('GROQ_API_KEY')" keypath="dashboard.noGroqKey" tag="p" class="text-rs-white/20 text-xs leading-relaxed">
+              <template #key><span class="font-mono text-rs-gold/40">GROQ_API_KEY</span></template>
+            </i18n-t>
             <p v-else-if="dash.matches.length === 0" class="text-rs-white/20 text-xs">
-              Jogue algumas partidas para ver a análise.
+              {{ $t('dashboard.playMoreMatches') }}
             </p>
             <p v-else-if="dash.analysisError" class="text-rs-white/20 text-xs">{{ dash.analysisError }}</p>
           </div>
@@ -485,6 +530,76 @@ function winrateColor(wr: number) {
 .dot-on  { background:#27AE60; box-shadow:0 0 5px #27AE60; animation:ping .8s ease infinite; }
 .dot-off { background:rgba(200,155,60,.2); }
 @keyframes ping { 0%,100%{opacity:1;} 50%{opacity:.5;} }
+
+/* ── Sync progress bar ───────────────────────────────── */
+.sync-bar {
+  display:       flex;
+  align-items:   center;
+  gap:           10px;
+  padding:       7px 12px;
+  margin:        2px 0 4px;
+  flex-shrink:   0;
+  background:    rgba(200,155,60,.06);
+  border:        1px solid rgba(200,155,60,.22);
+  border-radius: 3px;
+  /* clip hextech no canto superior-direito */
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+}
+
+.sync-spinner {
+  width:        11px;
+  height:       11px;
+  border-radius: 50%;
+  border:       2px solid rgba(200,155,60,.2);
+  border-top-color: #C89B3C;
+  animation:    spin .7s linear infinite;
+  flex-shrink:  0;
+}
+
+.sync-label {
+  font-family:    'Rajdhani','Inter',sans-serif;
+  font-size:      .7rem;
+  font-weight:    600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color:          rgba(200,155,60,.9);
+  min-width:      0;
+  overflow:       hidden;
+  text-overflow:  ellipsis;
+  white-space:    nowrap;
+  flex:           1;
+}
+
+.sync-track {
+  width:         120px;
+  height:        4px;
+  background:    rgba(200,155,60,.12);
+  border-radius: 2px;
+  overflow:      hidden;
+  flex-shrink:   0;
+}
+
+.sync-fill {
+  height:     100%;
+  background: linear-gradient(to right, rgba(200,155,60,.7), #C89B3C);
+  transition: width .3s ease;
+  border-radius: 2px;
+}
+
+.sync-pct {
+  font-family: 'Rajdhani','Inter',sans-serif;
+  font-size:   .72rem;
+  font-weight: 700;
+  color:       rgba(200,155,60,.75);
+  flex-shrink: 0;
+  min-width:   36px;
+  text-align:  right;
+}
+
+.sync-fade-enter-active { transition: opacity .2s ease; }
+.sync-fade-leave-active { transition: opacity .3s ease; }
+.sync-fade-enter-from,
+.sync-fade-leave-to     { opacity: 0; }
 
 /* ── Stats row ────────────────────────────────────────── */
 .stats-row {

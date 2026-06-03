@@ -1,17 +1,44 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
-import { useSettingsStore, PT_BR_VOICES } from '../stores/settings'
+import { useI18n } from 'vue-i18n'
+import { useSettingsStore } from '../stores/settings'
 import { debugFireReplay, debugFireWard } from '../services/coach'
 import type { AlertCategory, AlertSeverity } from '../stores/coach'
 
 const router   = useRouter()
 const settings = useSettingsStore()
+const { t }    = useI18n()
+
+// ── Tipo unificado de opção de voz ────────────────────────────
+interface VoiceOption { id: string; name: string; locale: string }
+
+// Vozes Piper TTS pt-BR — lista estática, alta qualidade via HF API
+const PT_VOICE_OPTIONS: VoiceOption[] = [
+  { id: 'pt_BR-cadu-medium',  name: 'Cadu',  locale: 'pt-BR' },
+  { id: 'pt_BR-faber-medium', name: 'Faber', locale: 'pt-BR' },
+  { id: 'pt_BR-jeff-medium',  name: 'Jeff',  locale: 'pt-BR' },
+  { id: 'pt_BR-miro-high',    name: 'Miro',  locale: 'pt-BR' },
+  { id: 'pt_BR-dii',          name: 'Dii',   locale: 'pt-BR' },
+]
+
+// Vozes Piper TTS en-US — lista estática, alta qualidade via HF API
+const EN_VOICE_OPTIONS: VoiceOption[] = [
+  { id: 'en_US-amy-medium',   name: 'Amy',   locale: 'en-US' },
+  { id: 'en_US-bryce-medium', name: 'Bryce', locale: 'en-US' },
+  { id: 'en_US-joe-medium',   name: 'Joe',   locale: 'en-US' },
+]
+
+const voicesLoading = ref(false)
+
+const currentVoices = computed<VoiceOption[]>(() =>
+  settings.appLanguage === 'pt-BR' ? PT_VOICE_OPTIONS : EN_VOICE_OPTIONS
+)
 
 // ── Preview de voz ────────────────────────────────────────────
 const previewLoading = ref<string | null>(null)
-const previewError   = ref(false)
+const previewError   = ref<string | null>(null)
 
 // ── Teste de alertas e wards ──────────────────────────────────
 const testLoading     = ref(false)
@@ -53,17 +80,21 @@ async function runTestWard() {
 async function previewVoice(voiceId: string) {
   if (previewLoading.value) return
   previewLoading.value = voiceId
-  previewError.value   = false
+  previewError.value   = null
   try {
     const dataUrl = await invoke<string>('speak_tts', {
-      text:  'Dragão disponível agora — vá agora!',
+      text:  t('settings.voicePreviewText'),
       voice: voiceId,
+      speed: settings.ttsSpeed,
     })
     const audio  = new Audio(dataUrl)
     audio.volume = settings.ttsVolume
     audio.play().catch(() => {})
-  } catch {
-    previewError.value = true
+  } catch (e: unknown) {
+    const msg = typeof e === 'string' ? e : String(e)
+    previewError.value = msg.includes('acordando') || msg.includes('waking')
+      ? t('settings.ttsWakingUp')
+      : t('settings.ttsOffline')
   } finally {
     previewLoading.value = null
   }
@@ -119,11 +150,11 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
           <path d="M9 2L4 7L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        Voltar
+        {{ $t('settings.back') }}
       </button>
       <div class="s-title">
         <span class="s-diamond">◆</span>
-        Configurações
+        {{ $t('settings.title') }}
       </div>
       <div class="w-20" />
     </header>
@@ -133,33 +164,41 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
 
         <!-- ── Seção: Voz do Coach ─────────────────────────── -->
         <section class="s-section">
-          <h2 class="s-section-title">Voz do Coach</h2>
+          <h2 class="s-section-title">{{ $t('settings.coachVoice') }}</h2>
+
+          <!-- Carregando vozes Windows (só aparece no modo EN) -->
+          <div v-if="voicesLoading" class="text-rs-white/25 text-xs tracking-wider py-2">
+            {{ $t('settings.loadingVoices') }}
+          </div>
+
+          <!-- Nenhuma voz encontrada (EN sem pacote instalado) -->
+          <div v-else-if="currentVoices.length === 0" class="preview-err" style="margin-bottom:8px">
+            {{ $t('settings.noVoicesFound') }}
+          </div>
 
           <!-- Cards de voz -->
-          <div class="voice-grid">
+          <div v-else class="voice-grid">
             <button
-              v-for="voice in PT_BR_VOICES"
+              v-for="voice in currentVoices"
               :key="voice.id"
               class="voice-card"
               :class="{ 'voice-card--active': settings.ttsVoice === voice.id }"
               @click="settings.setVoice(voice.id)"
             >
-              <!-- Radio dot -->
               <div class="voice-radio">
                 <div v-if="settings.ttsVoice === voice.id" class="voice-radio-dot" />
               </div>
 
               <div class="voice-info">
-                <span class="voice-name">{{ voice.label }}</span>
-                <span class="voice-gender">{{ voice.gender }}</span>
+                <span class="voice-name">{{ voice.name }}</span>
+                <span class="voice-gender">{{ voice.locale }}</span>
               </div>
 
-              <!-- Preview button -->
               <button
                 class="preview-btn"
                 :disabled="previewLoading !== null"
                 @click.stop="previewVoice(voice.id)"
-                title="Ouvir prévia"
+                :title="$t('settings.listenPreview')"
               >
                 <span v-if="previewLoading === voice.id" class="spin-small">⟳</span>
                 <svg v-else width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
@@ -170,7 +209,7 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
           </div>
 
           <p v-if="previewError" class="preview-err">
-            API TTS offline — verifique a conexão
+            {{ previewError }}
           </p>
 
           <!-- Volume -->
@@ -181,7 +220,7 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
                 <path d="M9.5 4.5C10.5 5.5 10.5 8.5 9.5 9.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                 <path d="M11 3C12.5 4.5 12.5 9.5 11 11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
               </svg>
-              Volume
+              {{ $t('settings.volume') }}
             </label>
             <input
               type="range"
@@ -192,6 +231,25 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
             />
             <span class="volume-val">{{ Math.round(settings.ttsVolume * 100) }}%</span>
           </div>
+
+          <!-- Velocidade -->
+          <div class="volume-row" style="margin-top:10px">
+            <label class="volume-label">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="flex-shrink:0">
+                <path d="M2 7 L6 3 L12 7 L6 11 Z" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                <circle cx="9" cy="7" r="1.2" fill="currentColor"/>
+              </svg>
+              {{ $t('settings.speed') }}
+            </label>
+            <input
+              type="range"
+              min="0.5" max="2.0" step="0.05"
+              :value="settings.ttsSpeed"
+              class="volume-slider"
+              @input="settings.setSpeed(parseFloat(($event.target as HTMLInputElement).value))"
+            />
+            <span class="volume-val">{{ settings.ttsSpeed.toFixed(2) }}x</span>
+          </div>
         </section>
 
         <div class="s-divider" />
@@ -199,7 +257,7 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
         <!-- ── Seção: Alertas ──────────────────────────────── -->
         <section class="s-section">
           <div class="section-header-row">
-            <h2 class="s-section-title">Alertas de Coaching</h2>
+            <h2 class="s-section-title">{{ $t('settings.coachAlerts') }}</h2>
             <!-- Toggle coach enabled -->
             <button
               class="toggle-btn"
@@ -213,7 +271,7 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
           <div :class="{ 'disabled-section': !settings.coachEnabled }">
 
             <!-- Categorias -->
-            <p class="s-sublabel">Categorias ativas</p>
+            <p class="s-sublabel">{{ $t('settings.activeCategories') }}</p>
             <div class="category-grid">
               <button
                 v-for="cat in CATEGORIES"
@@ -224,26 +282,26 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
                 @click="settings.toggleCategory(cat.id)"
               >
                 <span class="cat-dot" :style="{ background: settings.isCategoryEnabled(cat.id) ? cat.color : 'rgba(255,255,255,0.15)' }" />
-                {{ cat.label }}
+                {{ $t(`settings.categories.${cat.id.toLowerCase()}`) }}
               </button>
             </div>
 
             <!-- Severidade mínima -->
-            <p class="s-sublabel" style="margin-top:16px">Nível mínimo de alerta</p>
+            <p class="s-sublabel" style="margin-top:16px">{{ $t('settings.minAlertLevel') }}</p>
             <div class="severity-row">
               <button
                 v-for="sev in SEVERITIES"
                 :key="sev.id"
                 class="sev-btn"
                 :class="settings.minSeverity === sev.id ? 'sev-active' : 'sev-inactive'"
-                :title="sev.desc"
+                :title="$t(`settings.severities.${sev.id.toLowerCase()}.desc`)"
                 @click="settings.setMinSeverity(sev.id)"
               >
-                {{ sev.label }}
+                {{ $t(`settings.severities.${sev.id.toLowerCase()}.label`) }}
               </button>
             </div>
             <p class="sev-desc">
-              {{ SEVERITIES.find(s => s.id === settings.minSeverity)?.desc }}
+              {{ $t(`settings.severities.${settings.minSeverity.toLowerCase()}.desc`) }}
             </p>
 
           </div>
@@ -253,17 +311,13 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
 
         <!-- ── Seção: OCR / Modo de Tela ──────────────────── -->
         <section class="s-section">
-          <h2 class="s-section-title">Captura de Tela (OCR)</h2>
+          <h2 class="s-section-title">{{ $t('settings.screenCapture') }}</h2>
 
           <div class="ocr-banner">
             <div class="ocr-icon">⚠</div>
             <div class="ocr-text">
-              <p class="ocr-title">Jogue em modo Janela Sem Bordas</p>
-              <p class="ocr-desc">
-                O OCR captura a tela via GDI (Windows) e <strong>não funciona em fullscreen exclusivo</strong>.
-                Para receber todas as dicas sobre cooldowns de spells e minimapa, configure o League of Legends para
-                <strong>Janela Sem Bordas (Borderless)</strong> em <em>Vídeo → Modo de Tela</em>.
-              </p>
+              <p class="ocr-title">{{ $t('settings.ocr.title') }}</p>
+              <p class="ocr-desc" v-html="$t('settings.ocr.desc')" />
             </div>
           </div>
         </section>
@@ -273,13 +327,11 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
         <!-- ── Seção: SpellCoach ──────────────────────────── -->
         <section class="s-section">
           <div class="section-header-row">
-            <h2 class="s-section-title">SpellCoach — Meta Data</h2>
+            <h2 class="s-section-title">{{ $t('settings.spellCoach.title') }}</h2>
             <span class="sc-badge-label">API</span>
           </div>
           <p class="s-sublabel" style="margin-bottom:12px">
-            Sincroniza estatísticas de meta, builds e wards de alto elo com o banco local.
-            O app sincroniza automaticamente 8s após abrir e a cada 6h. Use o botão para
-            forçar uma atualização imediata.
+            {{ $t('settings.spellCoach.desc') }}
           </p>
 
           <button
@@ -290,19 +342,19 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
           >
             <span v-if="syncLoading" class="spin-small">⟳</span>
             <template v-else-if="syncResult">
-              ✓ {{ syncResult.synced.toLocaleString() }} registros
+              ✓ {{ syncResult.synced.toLocaleString() }} {{ $t('settings.spellCoach.records') }}
               <span v-if="syncResult.errors > 0" class="sc-err-count">
-                · {{ syncResult.errors }} erros
+                · {{ syncResult.errors }} {{ $t('settings.spellCoach.errors') }}
               </span>
             </template>
             <span v-else-if="syncError" class="sc-err-text">{{ syncError }}</span>
             <template v-else>
-              Sincronizar agora
+              {{ $t('settings.spellCoach.syncNow') }}
             </template>
           </button>
 
           <p class="s-sublabel" style="margin-top:10px;font-size:.52rem">
-            Cada chamada percorre 5 roles × 9 tiers (45 requests). Pode levar até 60s.
+            {{ $t('settings.spellCoach.note') }}
           </p>
         </section>
 
@@ -310,20 +362,20 @@ const SEVERITIES: { id: AlertSeverity; label: string; desc: string }[] = [
 
         <!-- ── Seção: Diagnóstico ──────────────────────────── -->
         <section class="s-section">
-          <h2 class="s-section-title">Diagnóstico</h2>
+          <h2 class="s-section-title">{{ $t('settings.diagnostic.title') }}</h2>
           <p class="s-sublabel" style="margin-bottom:12px">
-            Dispara alertas de teste para verificar flashcards, TTS e barra de wards.
+            {{ $t('settings.diagnostic.desc') }}
           </p>
           <div style="display:flex;flex-direction:column;gap:8px;">
             <button class="test-btn" :class="{ 'test-done': testDone }" :disabled="testLoading" @click="runTestAlerts">
               <span v-if="testLoading" class="spin-small">⟳</span>
-              <span v-else-if="testDone">✓ Alertas enviados</span>
-              <span v-else>Testar alertas + TTS</span>
+              <span v-else-if="testDone">✓ {{ $t('settings.diagnostic.alertsSent') }}</span>
+              <span v-else>{{ $t('settings.diagnostic.testAlerts') }}</span>
             </button>
             <button class="test-btn" :class="{ 'test-done': testWardDone }" :disabled="testWardLoading" @click="runTestWard">
               <span v-if="testWardLoading" class="spin-small">⟳</span>
-              <span v-else-if="testWardDone">✓ Barra de ward enviada</span>
-              <span v-else>Testar barra de wards</span>
+              <span v-else-if="testWardDone">✓ {{ $t('settings.diagnostic.wardsSent') }}</span>
+              <span v-else>{{ $t('settings.diagnostic.testWards') }}</span>
             </button>
           </div>
         </section>

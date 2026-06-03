@@ -9,6 +9,7 @@
 // ============================================================
 
 pub mod alerts;
+pub mod calibration;
 pub mod engine;
 pub mod procedural;
 pub mod ward_advisor;

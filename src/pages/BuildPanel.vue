@@ -20,7 +20,7 @@ onMounted(async () => {
       build.value     = null
       champion.value  = null
     }),
-    await listen<{ build: ChampionBuild; champion: ChampionInfo }>('build_panel_data', (e) => {
+    await listen<{ build: ChampionBuild | null; champion: ChampionInfo }>('build_panel_data', (e) => {
       build.value     = e.payload.build
       champion.value  = e.payload.champion
       isLoading.value = false

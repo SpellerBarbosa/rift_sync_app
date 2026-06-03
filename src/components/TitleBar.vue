@@ -2,9 +2,11 @@
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useRouter } from 'vue-router'
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useSettingsStore } from '../stores/settings'
 
-const win    = getCurrentWindow()
-const router = useRouter()
+const win      = getCurrentWindow()
+const router   = useRouter()
+const settings = useSettingsStore()
 
 const maximized = ref(false)
 let unlisten: (() => void) | null = null
@@ -21,6 +23,9 @@ onUnmounted(() => unlisten?.())
 function minimize()  { win.minimize() }
 function toggleMax() { maximized.value ? win.unmaximize() : win.maximize() }
 function close()     { win.close() }
+function toggleLang() {
+  settings.setLanguage(settings.appLanguage === 'pt-BR' ? 'en-US' : 'pt-BR')
+}
 </script>
 
 <template>
@@ -34,8 +39,17 @@ function close()     { win.close() }
 
     <!-- Window controls — NOT inside drag region -->
     <div class="tb-controls">
+
+      <!-- Language toggle -->
+      <button class="tb-btn tb-lang" @click="toggleLang" :title="$t('titleBar.switchLang')">
+        <span class="tb-lang-text">{{ settings.appLanguage === 'pt-BR' ? 'PT' : 'EN' }}</span>
+        <span class="tb-lang-sep">·</span>
+        <span class="tb-lang-other">{{ settings.appLanguage === 'pt-BR' ? 'EN' : 'PT' }}</span>
+      </button>
+      <div class="tb-sep" />
+
       <!-- Settings button -->
-      <button class="tb-btn tb-settings" @click="router.push('/settings')" title="Configurações">
+      <button class="tb-btn tb-settings" @click="router.push('/settings')" :title="$t('titleBar.settings')">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
           <circle cx="6.5" cy="6.5" r="2" stroke="currentColor" stroke-width="1.2"/>
           <path d="M6.5 1v1.5M6.5 10.5V12M1 6.5h1.5M10.5 6.5H12M2.6 2.6l1.05 1.05M9.35 9.35l1.05 1.05M2.6 10.4l1.05-1.05M9.35 3.65l1.05-1.05"
@@ -43,13 +57,13 @@ function close()     { win.close() }
         </svg>
       </button>
       <div class="tb-sep" />
-      <button class="tb-btn" @click="minimize" title="Minimizar">
+      <button class="tb-btn" @click="minimize" :title="$t('titleBar.minimize')">
         <svg width="10" height="1" viewBox="0 0 10 1">
           <line x1="0" y1="0.5" x2="10" y2="0.5" stroke="currentColor" stroke-width="1.5"/>
         </svg>
       </button>
 
-      <button class="tb-btn" @click="toggleMax" title="Maximizar / Restaurar">
+      <button class="tb-btn" @click="toggleMax" :title="$t('titleBar.maximize')">
         <!-- Restore icon when maximized -->
         <svg v-if="maximized" width="10" height="10" viewBox="0 0 10 10">
           <rect x="2" y="0" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"/>
@@ -61,7 +75,7 @@ function close()     { win.close() }
         </svg>
       </button>
 
-      <button class="tb-btn close-btn" @click="close" title="Fechar">
+      <button class="tb-btn close-btn" @click="close" :title="$t('titleBar.close')">
         <svg width="10" height="10" viewBox="0 0 10 10">
           <line x1="0.5" y1="0.5" x2="9.5" y2="9.5" stroke="currentColor" stroke-width="1.4"/>
           <line x1="9.5" y1="0.5" x2="0.5" y2="9.5" stroke="currentColor" stroke-width="1.4"/>
@@ -145,5 +159,36 @@ function close()     { win.close() }
   height: 14px;
   background: rgba(200,155,60,.12);
   align-self: center;
+}
+
+/* Language toggle */
+.tb-lang {
+  width: 54px;
+  gap: 3px;
+  font-family: 'Rajdhani', 'Inter', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.tb-lang-text {
+  color: rgba(200, 155, 60, 0.9);
+}
+
+.tb-lang-sep {
+  color: rgba(200, 155, 60, 0.25);
+  font-size: 8px;
+}
+
+.tb-lang-other {
+  color: rgba(200, 155, 60, 0.3);
+}
+
+.tb-lang:hover .tb-lang-text {
+  color: #C89B3C;
+}
+
+.tb-lang:hover .tb-lang-other {
+  color: rgba(200, 155, 60, 0.55);
 }
 </style>

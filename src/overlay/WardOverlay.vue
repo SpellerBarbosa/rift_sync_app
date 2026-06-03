@@ -282,14 +282,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* ── Painel — centro-inferior, não captura input ─────────────
-   bottom: 13vh ≈ 140px da base em 1080p (acima do HUD do LoL) */
+/* ── Painel — preenche a janela dedicada ward_win ─────────── */
 .wb-root {
-  position:       fixed;
-  bottom:         13vh;
-  left:           50%;
-  transform:      translateX(-50%);
-  z-index:        20;
+  position:       relative;
   pointer-events: none;
   user-select:    none;
 

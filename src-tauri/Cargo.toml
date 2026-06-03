@@ -79,6 +79,8 @@ windows = { version = "0.61", features = [
     "Media_Ocr",
     "Graphics_Imaging",
     "Storage_Streams",
+    # TTS via PowerShell System.Speech (Foundation_Collections ainda usado internamente)
+    "Foundation_Collections",
     # Detecção de janela do LoL + monitor correto
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",

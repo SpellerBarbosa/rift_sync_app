@@ -2,7 +2,6 @@
 import { onMounted, onUnmounted, watch } from 'vue'
 import { useGameStateStore } from '../stores/gameState'
 import { useChampSelectStore } from '../stores/champSelect'
-import RuneOverlay from '../overlay/RuneOverlay.vue'
 
 const gameStateStore   = useGameStateStore()
 const champSelectStore = useChampSelectStore()
@@ -56,17 +55,6 @@ watch(() => gameStateStore.phase, (phase) => {
 
     </div>
 
-    <!-- Painel de recomendação -->
-    <Transition name="panel-slide">
-      <RuneOverlay
-        v-if="champSelectStore.showPanel"
-        :recommendation="champSelectStore.recommendation"
-        :champion="champSelectStore.champion"
-        :is-loading="champSelectStore.isLoading"
-        :rec-error="champSelectStore.recError"
-        @dismiss="champSelectStore.dismiss()"
-      />
-    </Transition>
   </div>
 </template>
 
@@ -116,9 +104,4 @@ watch(() => gameStateStore.phase, (phase) => {
 .err-text   { color: rgba(192,57,43,.7); font-family: monospace; font-size: .6rem; }
 
 @keyframes ping { 0%,100%{opacity:1} 50%{opacity:.4} }
-
-.panel-slide-enter-active { transition: all .3s cubic-bezier(.22,1,.36,1); }
-.panel-slide-leave-active { transition: all .2s ease-in; }
-.panel-slide-enter-from   { opacity: 0; transform: translateX(40px); }
-.panel-slide-leave-to     { opacity: 0; transform: translateX(40px); }
 </style>

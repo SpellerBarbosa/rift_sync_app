@@ -255,11 +255,11 @@ fn meta_stat_to_response(stat: &ChampionMetaStat) -> ChampionMetaStatResponse {
 
 // ── Commands ──────────────────────────────────────────────────
 
-/// Sincroniza dados de meta de campeões da SpellCoach API para o banco local.
-/// Itera sobre todas as combinações de role × tier e faz upsert no SQLite.
-/// Deve ser chamado manualmente pelo usuário ou na inicialização do app.
+/// Sincroniza meta stats + builds de todos os campeões (manual — botão Configurações).
+/// Emite eventos `sync_progress` para o Dashboard acompanhar em tempo real.
 #[tauri::command]
 pub async fn sync_spellcoach_data(
+    app:   tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SpellCoachSyncResult, String> {
     let client = state
@@ -268,97 +268,17 @@ pub async fn sync_spellcoach_data(
         .ok_or_else(|| "SPELLCOACH_API_KEY não configurada".to_string())?
         .clone();
 
-    let mut synced:          i64 = 0;
-    let mut errors:          i64 = 0;
-    let mut combinations_ok: Vec<String> = Vec::new();
+    let (synced, errors) = crate::spellcoach::sync::full_sync_with_progress(
+        std::sync::Arc::clone(&state.db),
+        client,
+        &app,
+    ).await;
 
-    for role in ROLES {
-        for tier in TIERS {
-            match client.get_champions(role, tier).await {
-                Ok(champions) => {
-                    let db = state.db.lock().await;
-                    for c in &champions {
-                        let result = db.execute(
-                            "INSERT INTO champion_meta_stats (
-                                champion_id, role, tier, win_rate, wins, losses, total_games,
-                                avg_kills, avg_deaths, avg_assists, avg_kda,
-                                avg_damage_taken, avg_damage_to_champions, avg_damage_to_objectives,
-                                avg_vision_score, avg_wards_placed, avg_wards_killed, avg_control_wards_bought,
-                                pick_rate, power_phase_early, power_phase_mid, power_phase_late,
-                                synced_at
-                             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22, CURRENT_TIMESTAMP)
-                             ON CONFLICT(champion_id, role, tier) DO UPDATE SET
-                                win_rate                 = excluded.win_rate,
-                                wins                     = excluded.wins,
-                                losses                   = excluded.losses,
-                                total_games              = excluded.total_games,
-                                avg_kills                = excluded.avg_kills,
-                                avg_deaths               = excluded.avg_deaths,
-                                avg_assists              = excluded.avg_assists,
-                                avg_kda                  = excluded.avg_kda,
-                                avg_damage_taken         = excluded.avg_damage_taken,
-                                avg_damage_to_champions  = excluded.avg_damage_to_champions,
-                                avg_damage_to_objectives = excluded.avg_damage_to_objectives,
-                                avg_vision_score         = excluded.avg_vision_score,
-                                avg_wards_placed         = excluded.avg_wards_placed,
-                                avg_wards_killed         = excluded.avg_wards_killed,
-                                avg_control_wards_bought = excluded.avg_control_wards_bought,
-                                pick_rate                = excluded.pick_rate,
-                                power_phase_early        = excluded.power_phase_early,
-                                power_phase_mid          = excluded.power_phase_mid,
-                                power_phase_late         = excluded.power_phase_late,
-                                synced_at                = CURRENT_TIMESTAMP",
-                            rusqlite::params![
-                                c.champion_id,
-                                c.role,
-                                c.tier,
-                                c.win_rate,
-                                c.wins,
-                                c.losses,
-                                c.total_games,
-                                c.avg_kills,
-                                c.avg_deaths,
-                                c.avg_assists,
-                                c.avg_kda,
-                                c.avg_damage_taken,
-                                c.avg_damage_to_champions,
-                                c.avg_damage_to_objectives,
-                                c.avg_vision_score,
-                                c.avg_wards_placed,
-                                c.avg_wards_killed,
-                                c.avg_control_wards_bought,
-                                c.pick_rate,
-                                c.power_phases.early,
-                                c.power_phases.mid,
-                                c.power_phases.late,
-                            ],
-                        );
-                        match result {
-                            Ok(_) => synced += 1,
-                            Err(e) => {
-                                tracing::warn!("Falha ao inserir campeão {}: {e}", c.champion_id);
-                                errors += 1;
-                            }
-                        }
-                    }
-                    combinations_ok.push(format!("{role}/{tier}"));
-                    tracing::debug!(
-                        "SpellCoach sync: {role}/{tier} — {} campeões",
-                        champions.len()
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!("SpellCoach sync falhou para {role}/{tier}: {e}");
-                    errors += 1;
-                }
-            }
-        }
-    }
-
-    tracing::info!(
-        "SpellCoach sync concluído: {synced} registros, {errors} erros"
-    );
-    Ok(SpellCoachSyncResult { synced, errors, combinations_ok })
+    Ok(SpellCoachSyncResult {
+        synced,
+        errors,
+        combinations_ok: vec!["full_sync".into()],
+    })
 }
 
 /// Retorna dados de um campeão pelo ID numérico.

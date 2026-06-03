@@ -142,6 +142,7 @@ pub struct ChampionMetaStat {
 #[serde(rename_all = "camelCase")]
 pub struct CoachAlert {
     pub id: String,            // UUID v4
+    pub tip_id: String,        // ID estático da regra (ex: "kill_ally") — usado para calibração
     pub category: String,      // AlertCategory
     pub severity: String,      // AlertSeverity
     pub message: String,

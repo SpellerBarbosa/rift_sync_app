@@ -44,6 +44,8 @@ struct GameInfo {
     ally_team:         String,
     /// true = ORDER (time azul), false = CHAOS (time vermelho)
     is_blue_side:      bool,
+    /// true se o jogador local tem trinket de ward (3340/3363) ou Control Ward (2055) no inventário
+    has_ward_available: bool,
 }
 
 impl Default for GameInfo {
@@ -60,6 +62,7 @@ impl Default for GameInfo {
             enemy_champions:   Vec::new(),
             ally_team:         "ORDER".to_string(),
             is_blue_side:      true,
+            has_ward_available: false,
         }
     }
 }
@@ -115,6 +118,12 @@ async fn fetch_game_info(client: &LcuClient) -> GameInfo {
     let mut enemy_score: u8 = 0;
     let mut ally_team: Option<&str> = None;
 
+    // IDs de trinkets que permitem colocar wards (Stealth Ward, Farsight Alteration)
+    const WARD_TRINKET_IDS: &[u64] = &[3340, 3363];
+    const CONTROL_WARD_ID:   u64   = 2055;
+
+    let mut has_ward_available = false;
+
     for p in &players {
         let sn = p["summonerName"].as_str().unwrap_or("");
         let rn = p["riotIdGameName"].as_str().unwrap_or("");
@@ -123,6 +132,17 @@ async fn fetch_game_info(client: &LcuClient) -> GameInfo {
         {
             ally_team     = p["team"].as_str();
             champion_name = p["championName"].as_str().map(str::to_string);
+
+            if let Some(items) = p["items"].as_array() {
+                has_ward_available = items.iter().any(|item| {
+                    let id = item["itemID"].as_u64().unwrap_or(0);
+                    if id == CONTROL_WARD_ID {
+                        item["count"].as_u64().unwrap_or(0) > 0
+                    } else {
+                        WARD_TRINKET_IDS.contains(&id)
+                    }
+                });
+            }
         }
     }
 
@@ -179,17 +199,30 @@ async fn fetch_game_info(client: &LcuClient) -> GameInfo {
 
     GameInfo {
         champion_name,
-        is_ahead:          ally_score > enemy_score,
+        is_ahead:           ally_score > enemy_score,
         ally_score,
         enemy_score,
         dragon_count,
-        next_dragon_spawn: if last_dragon_kill_t > 0 { last_dragon_kill_t + 300 } else { 300 },
-        next_baron_spawn:  last_baron_kill_t.map(|t| t + 360),
+        next_dragon_spawn:  if last_dragon_kill_t > 0 { last_dragon_kill_t + 300 } else { 300 },
+        next_baron_spawn:   last_baron_kill_t.map(|t| t + 360),
         herald_killed,
         enemy_champions,
-        ally_team:         ally_team_str.to_string(),
-        is_blue_side:      ally_team_str == "ORDER",
+        ally_team:          ally_team_str.to_string(),
+        is_blue_side:       ally_team_str == "ORDER",
+        has_ward_available,
     }
+}
+
+// ── Fetch de idioma do banco ──────────────────────────────────
+
+async fn fetch_app_language(db: &Arc<Mutex<rusqlite::Connection>>) -> String {
+    let db = db.lock().await;
+    db.query_row(
+        "SELECT value FROM settings WHERE key = 'app_language'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .unwrap_or_else(|_| "pt-BR".to_string())
 }
 
 // ── Fetch de padrão comportamental do banco ───────────────────
@@ -246,6 +279,12 @@ pub async fn run_coach_loop(
     let mut proc_engine  = super::procedural::ProcEngine::new();
     let mut ward_advisor = super::ward_advisor::WardAdvisor::new();
     let mut game_time: u32 = 0;
+
+    // Idioma lido do banco; atualizado junto com os dados do LCU (a cada 30s).
+    let mut app_lang: String = fetch_app_language(&db).await;
+
+    // Pesos de calibração por tip_id — atualizados ao fim de cada partida.
+    let mut tip_weights = super::calibration::load_weights(&db).await;
 
     let mut proc_role:    String           = "UNKNOWN".to_string();
     // Inicializa com defaults para que evaluate() rode mesmo sem LCU conectado.
@@ -341,6 +380,10 @@ pub async fn run_coach_loop(
                 prev_opponent_cs   = 0;
                 enemy_templates.lock().await.clear();
                 proc_engine.reset();
+                // Recalibra pesos ao fim da partida se houver dados suficientes
+                if let Some(new_weights) = super::calibration::recalibrate_if_ready(&db).await {
+                    tip_weights = new_weights;
+                }
             }
             continue;
         }
@@ -393,6 +436,7 @@ pub async fn run_coach_loop(
                         &mut notified_enemy,
                         &mut last_enemy_notif,
                         game_time,
+                        &app_lang,
                     );
 
                     // ── Brecha de gank (inimigo além do rio) ──────────
@@ -400,7 +444,7 @@ pub async fn run_coach_loop(
                         .map(|i| i.is_blue_side)
                         .unwrap_or(true);
                     for alert in proc_engine.handle_gank_opportunity(
-                        x, y, is_blue, game_time, &proc_role,
+                        x, y, is_blue, game_time, &proc_role, &app_lang,
                     ) {
                         emit_alert(&app, &alert);
                     }
@@ -444,6 +488,7 @@ pub async fn run_coach_loop(
                 for alert in proc_engine.react_to_ocr_event(
                     &event, game_time, &proc_role,
                     smite_on_cd, objective_near, other_spell_available,
+                    &app_lang,
                 ) {
                     emit_alert(&app, &alert);
                 }
@@ -484,7 +529,7 @@ pub async fn run_coach_loop(
                                 new_ally, new_enemy,
                                 prev_ally, prev_enemy,
                                 game_time, proc_pattern.as_ref(),
-                                &proc_role,
+                                &proc_role, &app_lang,
                             ) {
                                 emit_alert(&app, &alert);
                             }
@@ -501,6 +546,18 @@ pub async fn run_coach_loop(
                             let (d_ally, d_enemy) = proc_info.as_ref()
                                 .map(|i| (i.dragon_count.ally, i.dragon_count.enemy))
                                 .unwrap_or((0, 0));
+
+                            // Pre-scan: coleta kills novas para detecção de teamfight e counter-kill
+                            let new_kills: Vec<(f64, &str, &str)> = events.iter()
+                                .filter_map(|ev| {
+                                    if ev["EventName"].as_str() != Some("ChampionKill") { return None; }
+                                    let t = ev["EventTime"].as_f64()?;
+                                    if t <= last_event_time { return None; }
+                                    Some((t,
+                                        ev["KillerName"].as_str().unwrap_or(""),
+                                        ev["VictimName"].as_str().unwrap_or("")))
+                                })
+                                .collect();
 
                             for ev in events {
                                 let ev_time = ev["EventTime"].as_f64().unwrap_or(0.0);
@@ -522,7 +579,7 @@ pub async fn run_coach_loop(
                                 let tower_team  = ev["TeamId"].as_str();
                                 let tower_is_ally_loss = tower_team == Some(ally_team);
 
-                                // ── ChampionKill: mensagem específica com nome + lane ──
+                                // ── ChampionKill ─────────────────────────────────────
                                 if ev["EventName"].as_str() == Some("ChampionKill") {
                                     let killer_name = ev["KillerName"].as_str().unwrap_or("");
                                     let victim_name = ev["VictimName"].as_str().unwrap_or("");
@@ -536,31 +593,74 @@ pub async fn run_coach_loop(
                                         })
                                     };
 
-                                    let killer_champ = find_player(killer_name)
-                                        .and_then(|p| p["championName"].as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    let killer_team_str = find_player(killer_name)
-                                        .and_then(|p| p["team"].as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    let victim_champ = find_player(victim_name)
-                                        .and_then(|p| p["championName"].as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    let victim_lane = find_player(victim_name)
-                                        .and_then(|p| p["position"].as_str())
-                                        .unwrap_or("")
-                                        .to_string();
+                                    let killer_champ    = find_player(killer_name).and_then(|p| p["championName"].as_str()).unwrap_or("").to_string();
+                                    let killer_team_str = find_player(killer_name).and_then(|p| p["team"].as_str()).unwrap_or("").to_string();
+                                    let victim_champ    = find_player(victim_name).and_then(|p| p["championName"].as_str()).unwrap_or("").to_string();
+                                    let victim_role     = find_player(victim_name).and_then(|p| p["position"].as_str()).unwrap_or("").to_string();
+                                    let kill_is_ally    = killer_team_str == ally_team;
 
-                                    let kill_is_ally = killer_team_str == ally_team;
+                                    // Teamfight: 3+ kills em janela de 10s
+                                    let is_teamfight = new_kills.iter()
+                                        .filter(|(t, _, _)| (t - ev_time).abs() <= 10.0)
+                                        .count() >= 3;
 
-                                    for alert in proc_engine.handle_champion_kill(
-                                        &killer_champ, &victim_champ, &victim_lane,
-                                        kill_is_ally, game_time, &proc_role,
-                                        proc_pattern.as_ref(),
-                                    ) {
+                                    // Counter-kill: killer foi morto nos 10s seguintes
+                                    let killer_counter_killed = new_kills.iter()
+                                        .any(|(t, _, v)| *v == killer_name && *t > ev_time && *t <= ev_time + 10.0);
+
+                                    // TP threat: outro inimigo vivo tem Teleport
+                                    let enemy_tp_threat = kill_is_ally && players.map(|ps| {
+                                        ps.iter().any(|p| {
+                                            p["team"].as_str() != Some(ally_team)
+                                                && p["summonerName"].as_str().unwrap_or("") != victim_name
+                                                && p["riotIdGameName"].as_str().unwrap_or("") != victim_name
+                                                && (p["summonerSpells"]["summonerSpellOne"]["displayName"]
+                                                        .as_str().unwrap_or("").contains("Teleport")
+                                                    || p["summonerSpells"]["summonerSpellTwo"]["displayName"]
+                                                        .as_str().unwrap_or("").contains("Teleport"))
+                                        })
+                                    }).unwrap_or(false);
+
+                                    let dragon_secs = proc_info.as_ref()
+                                        .map(|i| i.next_dragon_spawn.saturating_sub(game_time))
+                                        .unwrap_or(u32::MAX);
+                                    let baron_secs = proc_info.as_ref()
+                                        .and_then(|i| i.next_baron_spawn)
+                                        .map(|t| t.saturating_sub(game_time));
+
+                                    let kill_ctx = super::procedural::KillCtx {
+                                        killer_champ,
+                                        victim_champ,
+                                        victim_role,
+                                        is_ally_kill:          kill_is_ally,
+                                        game_time,
+                                        player_role:           proc_role.clone(),
+                                        dragon_secs,
+                                        baron_secs,
+                                        enemy_tp_threat,
+                                        is_teamfight,
+                                        killer_counter_killed,
+                                        has_ward_available:    proc_info.as_ref()
+                                            .map(|i| i.has_ward_available)
+                                            .unwrap_or(false),
+                                    };
+
+                                    for alert in proc_engine.handle_champion_kill(&kill_ctx, proc_pattern.as_ref(), &app_lang) {
+                                        if !super::calibration::should_emit(&alert.tip_id, &tip_weights) {
+                                            continue;
+                                        }
                                         emit_alert(&app, &alert);
+                                        let predicted = match alert.tip_id.as_str() {
+                                            "kill_ally"  => Some("ally_objective"),
+                                            "kill_enemy" => Some("no_ally_death"),
+                                            _            => None,
+                                        };
+                                        if let Some(pred) = predicted {
+                                            super::calibration::log_tip(
+                                                &db, &alert.tip_id, &alert.category,
+                                                game_time, pred,
+                                            ).await;
+                                        }
                                     }
                                 }
 
@@ -577,7 +677,7 @@ pub async fn run_coach_loop(
                                     for alert in proc_engine.handle_objective_event(
                                         obj, ally, game_time, &proc_role,
                                         d_ally, d_enemy,
-                                        proc_pattern.as_ref(),
+                                        proc_pattern.as_ref(), &app_lang,
                                     ) {
                                         emit_alert(&app, &alert);
                                     }
@@ -585,12 +685,20 @@ pub async fn run_coach_loop(
                                     // Coaching específico pelo tipo do drake
                                     if obj == "dragon" {
                                         let drake_type = ev["DragonType"].as_str().unwrap_or("Unknown");
-                                        for alert in proc_engine.handle_drake_type(drake_type, ally, game_time) {
+                                        for alert in proc_engine.handle_drake_type(drake_type, ally, game_time, &app_lang) {
                                             emit_alert(&app, &alert);
                                         }
                                     }
                                 }
                             }
+                            // Resolve outcomes de tips pendentes cujo window de 30s fechou
+                            let players_slice: Vec<serde_json::Value> = players
+                                .map(|ps| ps.to_vec())
+                                .unwrap_or_default();
+                            super::calibration::resolve_outcomes(
+                                &db, game_time, ally_team,
+                                events, &players_slice,
+                            ).await;
                         }
 
                         // ── CS, nível e smite — extraídos do allPlayers ───────
@@ -658,7 +766,7 @@ pub async fn run_coach_loop(
                                 let player_lvl = me["level"].as_u64().unwrap_or(0) as u8;
 
                                 // CS vs benchmark
-                                for alert in proc_engine.handle_cs_update(player_cs, game_time, &proc_role) {
+                                for alert in proc_engine.handle_cs_update(player_cs, game_time, &proc_role, &app_lang) {
                                     emit_alert(&app, &alert);
                                 }
 
@@ -675,7 +783,7 @@ pub async fn run_coach_loop(
                                     // CS vs oponente
                                     if player_cs != prev_player_cs_lane || opp_cs != prev_opponent_cs {
                                         for alert in proc_engine.handle_cs_lane_gap(
-                                            player_cs, opp_cs, &proc_role, game_time,
+                                            player_cs, opp_cs, &proc_role, game_time, &app_lang,
                                         ) { emit_alert(&app, &alert); }
                                         prev_player_cs_lane = player_cs;
                                         prev_opponent_cs    = opp_cs;
@@ -684,7 +792,7 @@ pub async fn run_coach_loop(
                                     // Level vs oponente
                                     if player_lvl != prev_player_level {
                                         for alert in proc_engine.handle_level_change(
-                                            player_lvl, prev_player_level, opp_lvl, &proc_role, game_time,
+                                            player_lvl, prev_player_level, opp_lvl, &proc_role, game_time, &app_lang,
                                         ) { emit_alert(&app, &alert); }
                                         prev_player_level = player_lvl;
                                     }
@@ -721,7 +829,7 @@ pub async fn run_coach_loop(
                                     // Power spikes do oponente → alerta + atualização do overlay
                                     if opp_lvl != prev_opponent_level && opp_lvl > 0 {
                                         for alert in proc_engine.handle_enemy_level_spike(
-                                            opp_lvl, prev_opponent_level, game_time, &proc_role,
+                                            opp_lvl, prev_opponent_level, game_time, &proc_role, &app_lang,
                                         ) {
                                             emit_alert(&app, &alert);
                                         }
@@ -737,7 +845,7 @@ pub async fn run_coach_loop(
                                     // Sem oponente detectado — apenas power spike
                                     let lvl = me["level"].as_u64().unwrap_or(0) as u8;
                                     for alert in proc_engine.handle_level_change(
-                                        lvl, prev_player_level, lvl, &proc_role, game_time,
+                                        lvl, prev_player_level, lvl, &proc_role, game_time, &app_lang,
                                     ) { emit_alert(&app, &alert); }
                                     prev_player_level = lvl;
                                 }
@@ -808,7 +916,7 @@ pub async fn run_coach_loop(
                     enemy_in_opp_jungle,
                 };
 
-                let eval_alerts = proc_engine.evaluate(&proc_ctx);
+                let eval_alerts = proc_engine.evaluate(&proc_ctx, &app_lang);
 
                 // Detecta se algum alerta de VISÃO foi gerado nesta avaliação.
                 // Se sim, os spots de ward são emitidos como `ward_spots_forced`
@@ -822,9 +930,14 @@ pub async fn run_coach_loop(
 
                 let spots = proc_engine.suggest_ward_spots(&proc_ctx);
 
-                // Spots da SpellCoach API — filtrando por role + CHALLENGER
-                let is_red = proc_info.as_ref().map(|i| !i.is_blue_side).unwrap_or(false);
-                let advice = ward_advisor.get_advice(game_time, is_red, 5);
+                // Spots da SpellCoach API — só emite se o jogador tem ward no inventário
+                let is_red       = proc_info.as_ref().map(|i| !i.is_blue_side).unwrap_or(false);
+                let has_ward     = proc_info.as_ref().map(|i| i.has_ward_available).unwrap_or(false);
+                let advice = if has_ward {
+                    ward_advisor.get_advice(game_time, is_red, 5)
+                } else {
+                    super::ward_advisor::WardAdvice { spots: vec![], alert: None }
+                };
 
                 // Momentos chave para mostrar ward spots no WardOverlay:
                 //   1. Alerta de visão disparado → emissão forçada imediata
@@ -848,6 +961,7 @@ pub async fn run_coach_loop(
                     if let Some(ref msg) = advice.alert {
                         emit_alert(&app, &CoachAlert {
                             id:        uuid::Uuid::new_v4().to_string(),
+                            tip_id:    "ward_smart".to_string(),
                             category:  "VISION".to_string(),
                             severity:  "INFO".to_string(),
                             message:   msg.clone(),
@@ -882,6 +996,9 @@ pub async fn run_coach_loop(
             .unwrap_or(true);
 
         if need_refresh {
+            // Atualiza idioma a cada ciclo de 30s para refletir mudanças em runtime.
+            app_lang = fetch_app_language(&db).await;
+
             let fetched_role = fetch_player_role(client).await;
             if fetched_role != "UNKNOWN" {
                 proc_role = fetched_role;
@@ -987,6 +1104,7 @@ fn detect_ward_reveals(
     notified:    &mut Vec<(f32, f32, Instant)>,
     last_notif:  &mut Option<Instant>,
     game_time:   u32,
+    lang:        &str,
 ) {
     const CONFIRM_FRAMES:  u8  = 2;    // 2 × ~2s OCR = ~4s visível antes de alertar
     const NOTIFIED_SECS:   u64 = 120;
@@ -1024,15 +1142,23 @@ fn detect_ward_reveals(
 
                 if area_clear && global_clear {
                     let zone = classify_zone(x, y);
+                    let zone_label = zone_label(zone, lang);
 
-                    let message = if champ_name.is_empty() {
-                        format!("Inimigo avistado na {} — ward aqui para manter a visão", zone)
+                    let message = if lang == "en-US" {
+                        if champ_name.is_empty() {
+                            format!("Enemy spotted in {} — ward here to maintain vision", zone_label)
+                        } else {
+                            format!("{} spotted in {} — ward here to maintain vision", champ_name, zone_label)
+                        }
+                    } else if champ_name.is_empty() {
+                        format!("Inimigo avistado na {} — ward aqui para manter a visão", zone_label)
                     } else {
-                        format!("{} avistado na {} — ward aqui para manter a visão", champ_name, zone)
+                        format!("{} avistado na {} — ward aqui para manter a visão", champ_name, zone_label)
                     };
 
                     emit_alert(app, &CoachAlert {
                         id:        uuid::Uuid::new_v4().to_string(),
+                        tip_id:    "vision_enemy".to_string(),
                         category:  "VISION".to_string(),
                         severity:  "WARNING".to_string(),
                         message,
@@ -1041,13 +1167,13 @@ fn detect_ward_reveals(
 
                     // Ward spots relevantes para a zona onde o inimigo foi avistado
                     let spots: &[&str] = match zone {
-                        "área do Baron"   => &["baron_pit", "baron_river"],
-                        "área do Drake"   => &["dragon_pit", "pixel_ward", "river_bot_brush"],
-                        "top lane"        => &["top_river", "tribush_top"],
-                        "bot lane"        => &["river_bot_brush", "pixel_ward"],
-                        "jungle top"      => &["deep_top_enemy", "baron_river"],
-                        "jungle bot"      => &["deep_bot_enemy", "river_bot_brush"],
-                        "rio / mid"       => &["mid_river_drake", "mid_river_baron"],
+                        "baron"    => &["baron_pit", "baron_river"],
+                        "dragon"   => &["dragon_pit", "pixel_ward", "river_bot_brush"],
+                        "top_lane" => &["top_river", "tribush_top"],
+                        "bot_lane" => &["river_bot_brush", "pixel_ward"],
+                        "jg_top"   => &["deep_top_enemy", "baron_river"],
+                        "jg_bot"   => &["deep_bot_enemy", "river_bot_brush"],
+                        "river_mid" => &["mid_river_drake", "mid_river_baron"],
                         _                 => &[],
                     };
                     if !spots.is_empty() {
@@ -1119,25 +1245,47 @@ async fn load_enemy_templates(
     }
 }
 
+/// Classifica a posição em uma zona interna (chave estável, independente de idioma).
 fn classify_zone(x: f32, y: f32) -> &'static str {
-    // Áreas de objetivo
-    if (28.0..=44.0).contains(&x) && (18.0..=36.0).contains(&y) { return "área do Baron"; }
-    if (60.0..=80.0).contains(&x) && (60.0..=80.0).contains(&y) { return "área do Drake"; }
+    if (28.0..=44.0).contains(&x) && (18.0..=36.0).contains(&y) { return "baron"; }
+    if (60.0..=80.0).contains(&x) && (60.0..=80.0).contains(&y) { return "dragon"; }
+    if x < 15.0 && y > 82.0 { return "ally_base"; }
+    if x > 85.0 && y < 18.0 { return "enemy_base"; }
+    if x < 18.0 || (x < 28.0 && y < 45.0) { return "top_lane"; }
+    if y > 82.0 || (x > 72.0 && y > 55.0)  { return "bot_lane"; }
+    if x < 48.0 && y < 52.0 { return "jg_top"; }
+    if x > 52.0 && y > 48.0 { return "jg_bot"; }
+    if (35.0..=65.0).contains(&x) && (35.0..=65.0).contains(&y) { return "river_mid"; }
+    "map"
+}
 
-    // Bases
-    if x < 15.0 && y > 82.0 { return "base aliada"; }
-    if x > 85.0 && y < 18.0 { return "base inimiga"; }
-
-    // Lanes
-    if x < 18.0 || (x < 28.0 && y < 45.0) { return "top lane"; }
-    if y > 82.0 || (x > 72.0 && y > 55.0)  { return "bot lane"; }
-
-    // Jungles
-    if x < 48.0 && y < 52.0 { return "jungle top"; }
-    if x > 52.0 && y > 48.0 { return "jungle bot"; }
-
-    // Rio / Mid
-    if (35.0..=65.0).contains(&x) && (35.0..=65.0).contains(&y) { return "rio / mid"; }
-
-    "mapa"
+/// Traduz a zona interna para o rótulo exibido ao jogador.
+fn zone_label(zone: &str, lang: &str) -> &'static str {
+    if lang == "en-US" {
+        match zone {
+            "baron"      => "Baron area",
+            "dragon"     => "Dragon area",
+            "ally_base"  => "allied base",
+            "enemy_base" => "enemy base",
+            "top_lane"   => "top lane",
+            "bot_lane"   => "bot lane",
+            "jg_top"     => "top jungle",
+            "jg_bot"     => "bot jungle",
+            "river_mid"  => "river / mid",
+            _            => "the map",
+        }
+    } else {
+        match zone {
+            "baron"      => "área do Baron",
+            "dragon"     => "área do Drake",
+            "ally_base"  => "base aliada",
+            "enemy_base" => "base inimiga",
+            "top_lane"   => "top lane",
+            "bot_lane"   => "bot lane",
+            "jg_top"     => "jungle top",
+            "jg_bot"     => "jungle bot",
+            "river_mid"  => "rio / mid",
+            _            => "mapa",
+        }
+    }
 }

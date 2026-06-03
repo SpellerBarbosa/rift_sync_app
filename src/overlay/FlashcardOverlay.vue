@@ -6,19 +6,19 @@ import type { AlertCategory, AlertSeverity } from '../stores/coach'
 const coach = useCoachStore()
 
 const CATEGORY_COLOR: Record<AlertCategory, string> = {
-  OBJECTIVE:    '#C89B3C',
-  VISION:       '#06B6D4',
-  MACRO:        '#A78BFA',
-  TRADE:        '#FB923C',
-  POSITIONING:  '#60A5FA',
+  OBJECTIVE:   '#C89B3C',
+  VISION:      '#06B6D4',
+  MACRO:       '#A78BFA',
+  TRADE:       '#FB923C',
+  POSITIONING: '#60A5FA',
 }
 
 const CATEGORY_LABEL: Record<AlertCategory, string> = {
-  OBJECTIVE:    'Objetivo',
-  VISION:       'Visão',
-  MACRO:        'Macro',
-  TRADE:        'Trade',
-  POSITIONING:  'Posição',
+  OBJECTIVE:   'Objetivo',
+  VISION:      'Visão',
+  MACRO:       'Macro',
+  TRADE:       'Trade',
+  POSITIONING: 'Posição',
 }
 
 const DISMISS_MS: Record<AlertSeverity, number> = {
@@ -30,61 +30,58 @@ const DISMISS_MS: Record<AlertSeverity, number> = {
 const SEVERITY_ACCENT: Record<AlertSeverity, string> = {
   CRITICAL: '#E74C3C',
   WARNING:  '#C89B3C',
-  INFO:     '#4A6080',
+  INFO:     '#06B6D4',
 }
 
-const SEVERITY_BG: Record<AlertSeverity, string> = {
-  CRITICAL: 'rgba(231,76,60,0.10)',
-  WARNING:  'rgba(10,14,20,0.93)',
-  INFO:     'rgba(6,8,12,0.90)',
-}
-
-const card       = computed(() => coach.activeCard)
-const pending    = computed(() => coach.cardQueue.length)
-const accent     = computed(() => card.value ? SEVERITY_ACCENT[card.value.severity] : '#4A6080')
-const catColor   = computed(() => card.value ? CATEGORY_COLOR[card.value.category] : '#C89B3C')
-const catLabel   = computed(() => card.value ? CATEGORY_LABEL[card.value.category] : '')
-const bgColor    = computed(() => card.value ? SEVERITY_BG[card.value.severity] : 'transparent')
-const dismissMs  = computed(() => card.value ? DISMISS_MS[card.value.severity] : 4_000)
+const card      = computed(() => coach.activeCard)
+const pending   = computed(() => coach.cardQueue.length)
+const accent    = computed(() => card.value ? SEVERITY_ACCENT[card.value.severity] : '#06B6D4')
+const catColor  = computed(() => card.value ? CATEGORY_COLOR[card.value.category] : '#C89B3C')
+const catLabel  = computed(() => card.value ? CATEGORY_LABEL[card.value.category] : '')
+const dismissMs = computed(() => card.value ? DISMISS_MS[card.value.severity] : 4_000)
 </script>
 
 <template>
-  <div class="fixed top-5 right-5 z-50 w-[320px] pointer-events-none select-none">
+  <div class="fc-root">
     <Transition name="fc">
       <div
         v-if="card"
         :key="card.id"
         class="fc-card"
-        :style="{ background: bgColor }"
+        :style="{ '--accent': accent, '--cat': catColor }"
       >
-        <!-- Accent bar esquerdo (severity) -->
-        <div class="fc-accent" :style="{ background: accent }" />
+        <!-- Corte angular hextech superior-direito -->
+        <div class="fc-corner-cut" />
 
-        <!-- Corpo -->
-        <div class="fc-body">
+        <!-- Linha de acento superior (severity color) -->
+        <div class="fc-top-line" />
 
-          <!-- Header: categoria + pending -->
+        <!-- Conteúdo -->
+        <div class="fc-inner">
+
+          <!-- Header -->
           <div class="fc-header">
-            <span class="fc-category" :style="{ color: catColor }">
-              {{ catLabel }}
-            </span>
-            <span v-if="pending > 0" class="fc-pending">
-              +{{ pending }}
-            </span>
+            <div class="fc-cat-row">
+              <div class="fc-cat-diamond" />
+              <span class="fc-category">{{ catLabel }}</span>
+            </div>
+            <span v-if="pending > 0" class="fc-pending">+{{ pending }}</span>
           </div>
 
-          <!-- Mensagem principal -->
+          <!-- Mensagem -->
           <p class="fc-message">{{ card.message }}</p>
 
-          <!-- Progress bar -->
-          <div class="fc-track">
-            <div
-              class="fc-fill progress-run"
-              :style="{
-                '--dur':   dismissMs + 'ms',
-                '--color': accent,
-              }"
-            />
+          <!-- Footer: severity badge + progress -->
+          <div class="fc-footer">
+            <span class="fc-severity-badge" :class="card.severity.toLowerCase()">
+              {{ card.severity }}
+            </span>
+            <div class="fc-track">
+              <div
+                class="fc-fill"
+                :style="{ '--dur': dismissMs + 'ms' }"
+              />
+            </div>
           </div>
 
         </div>
@@ -94,32 +91,67 @@ const dismissMs  = computed(() => card.value ? DISMISS_MS[card.value.severity] :
 </template>
 
 <style scoped>
+.fc-root {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  width: 300px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 50;
+}
+
 /* ── Transição ───────────────────────────────────────────── */
-.fc-enter-active { transition: opacity 0.18s ease, transform 0.18s ease; }
-.fc-leave-active { transition: opacity 0.12s ease, transform 0.12s ease; }
-.fc-enter-from   { opacity: 0; transform: translateX(16px); }
-.fc-leave-to     { opacity: 0; transform: translateX(16px); }
+.fc-enter-active { transition: opacity 0.20s ease, transform 0.20s cubic-bezier(0.22,1,0.36,1); }
+.fc-leave-active { transition: opacity 0.14s ease, transform 0.14s ease; }
+.fc-enter-from   { opacity: 0; transform: translateX(20px); }
+.fc-leave-to     { opacity: 0; transform: translateX(12px); }
 
-/* ── Card ────────────────────────────────────────────────── */
+/* ── Card hextech ────────────────────────────────────────── */
 .fc-card {
-  display: flex;
-  border-radius: 3px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.055);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(255,255,255,0.03);
-  backdrop-filter: blur(12px);
+  position: relative;
+  background: rgba(4, 10, 22, 0.97);
+  border: 1px solid rgba(var(--accent-rgb, 6,182,212), 0.28);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+
+  /* Corte angular no canto superior-direito (hextech) */
+  clip-path: polygon(
+    0 0,
+    calc(100% - 16px) 0,
+    100% 16px,
+    100% 100%,
+    0 100%
+  );
+
+  overflow: visible;
 }
 
-/* ── Barra lateral de severidade ─────────────────────────── */
-.fc-accent {
-  width: 3px;
-  flex-shrink: 0;
+/* Linha de acento superior */
+.fc-top-line {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 16px;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.9;
 }
 
-/* ── Corpo do card ───────────────────────────────────────── */
-.fc-body {
-  flex: 1;
-  min-width: 0;
+/* Triângulo do canto cortado */
+.fc-corner-cut {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 18px;
+  height: 18px;
+  background: rgba(4, 10, 22, 0.97);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* ── Inner ───────────────────────────────────────────────── */
+.fc-inner {
   padding: 10px 13px 0;
 }
 
@@ -128,22 +160,38 @@ const dismissMs  = computed(() => card.value ? DISMISS_MS[card.value.severity] :
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
+}
+
+.fc-cat-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.fc-cat-diamond {
+  width: 5px;
+  height: 5px;
+  background: var(--cat);
+  transform: rotate(45deg);
+  flex-shrink: 0;
+  opacity: 0.9;
 }
 
 .fc-category {
+  font-family: 'Rajdhani', 'Inter', sans-serif;
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.20em;
   text-transform: uppercase;
-  font-family: 'Rajdhani', 'Inter', sans-serif;
+  color: var(--cat);
 }
 
 .fc-pending {
+  font-family: 'Rajdhani', 'Inter', sans-serif;
   font-size: 9px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.22);
-  font-family: 'Rajdhani', 'Inter', sans-serif;
+  color: rgba(255,255,255,0.22);
   letter-spacing: 0.05em;
 }
 
@@ -154,23 +202,57 @@ const dismissMs  = computed(() => card.value ? DISMISS_MS[card.value.severity] :
   font-weight: 500;
   color: rgba(232, 224, 210, 0.92);
   letter-spacing: 0.01em;
-  margin: 0 0 10px;
+  margin: 0 0 9px;
   word-break: break-word;
+}
+
+/* ── Footer ──────────────────────────────────────────────── */
+.fc-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 1px;
+}
+
+.fc-severity-badge {
+  font-family: 'Rajdhani', 'Inter', sans-serif;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+.fc-severity-badge.critical {
+  color: rgba(231,76,60,0.9);
+  background: rgba(231,76,60,0.1);
+  border: 1px solid rgba(231,76,60,0.25);
+}
+.fc-severity-badge.warning {
+  color: rgba(200,155,60,0.9);
+  background: rgba(200,155,60,0.1);
+  border: 1px solid rgba(200,155,60,0.25);
+}
+.fc-severity-badge.info {
+  color: rgba(6,182,212,0.8);
+  background: rgba(6,182,212,0.08);
+  border: 1px solid rgba(6,182,212,0.2);
 }
 
 /* ── Progress bar ────────────────────────────────────────── */
 .fc-track {
+  flex: 1;
   height: 2px;
-  background: rgba(255, 255, 255, 0.06);
-  margin: 0 -13px;
+  background: rgba(255,255,255,0.06);
   overflow: hidden;
 }
 
 .fc-fill {
   height: 100%;
   width: 100%;
-  background: var(--color);
-  opacity: 0.7;
+  background: var(--accent);
+  opacity: 0.75;
   animation: bar-shrink var(--dur) linear forwards;
 }
 

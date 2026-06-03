@@ -240,8 +240,8 @@ onMounted(async () => {
 
 <style scoped>
 .loading-screen {
-  position: fixed;
-  inset: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #0a0a0f;

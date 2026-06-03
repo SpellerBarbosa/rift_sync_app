@@ -1,25 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue'
 import { useGameStateStore } from '../stores/gameState'
-import { useChampSelectStore } from '../stores/champSelect'
-import RuneOverlay  from './RuneOverlay.vue'
-import BuildOverlay from './BuildOverlay.vue'
 
-const gameState  = useGameStateStore()
-const champSelect = useChampSelectStore()
-
-onMounted(() => {
-  if (gameState.phase === 'PICK_PHASE') champSelect.startPolling()
-})
-
-onUnmounted(() => {
-  champSelect.reset()
-})
-
-watch(() => gameState.phase, (phase) => {
-  if (phase === 'PICK_PHASE') champSelect.startPolling()
-  else if (phase !== 'BAN_PHASE') champSelect.reset()
-})
+const gameState = useGameStateStore()
 </script>
 
 <template>
@@ -29,25 +11,6 @@ watch(() => gameState.phase, (phase) => {
       <div class="ban-dot" />
       <span>Fase de Banimento</span>
     </div>
-
-    <!-- Build overlay: lado esquerdo -->
-    <BuildOverlay
-      v-if="champSelect.showPanel"
-      :build="champSelect.build"
-      :champion="champSelect.champion"
-      :is-loading="champSelect.isLoading"
-      @dismiss="champSelect.dismiss()"
-    />
-
-    <!-- Painel de runas: lado direito -->
-    <RuneOverlay
-      v-if="champSelect.showPanel"
-      :recommendation="champSelect.recommendation"
-      :champion="champSelect.champion"
-      :is-loading="champSelect.isLoading"
-      :rec-error="champSelect.recError"
-      @dismiss="champSelect.dismiss()"
-    />
   </div>
 </template>
 
@@ -60,9 +23,7 @@ watch(() => gameState.phase, (phase) => {
 }
 
 .ban-indicator {
-  position: fixed;
-  top: 16px;
-  right: 16px;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;

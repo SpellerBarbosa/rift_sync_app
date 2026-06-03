@@ -164,7 +164,7 @@ function pct(v: number) { return (v * 100).toFixed(0) + '%' }
 
 <template>
   <Transition name="build-slide">
-    <div v-if="champion && (isLoading || hasBuild)" class="bo-root" @click.stop>
+    <div v-if="champion" class="bo-root" @click.stop>
 
       <!-- ── Header ─────────────────────────────────────── -->
       <div class="bo-header">
@@ -189,6 +189,12 @@ function pct(v: number) { return (v * 100).toFixed(0) + '%' }
         <div class="bo-skel bo-skel-row" />
         <div class="bo-skel bo-skel-row" />
         <div class="bo-skel bo-skel-row" />
+      </div>
+
+      <!-- ── Sem dados no banco ─────────────────────────── -->
+      <div v-else-if="!isLoading && !hasBuild" class="bo-no-data">
+        <p class="bo-no-data-msg">Build não sincronizada.</p>
+        <p class="bo-no-data-hint">Abra Configurações → Sincronizar agora.</p>
       </div>
 
       <template v-else-if="hasBuild">
@@ -515,6 +521,28 @@ function pct(v: number) { return (v * 100).toFixed(0) + '%' }
   color:          rgba(39,174,96,.8);
   margin-left:    auto;
   flex-shrink:    0;
+}
+
+/* ── Sem dados ───────────────────────────────────────────── */
+.bo-no-data {
+  padding:         16px 12px;
+  display:         flex;
+  flex-direction:  column;
+  gap:             4px;
+  align-items:     flex-start;
+}
+.bo-no-data-msg {
+  font-family:    'Rajdhani', 'Inter', sans-serif;
+  font-size:      .72rem;
+  font-weight:    600;
+  color:          rgba(200,155,60,.5);
+  letter-spacing: .06em;
+}
+.bo-no-data-hint {
+  font-family:    'Rajdhani', 'Inter', sans-serif;
+  font-size:      .62rem;
+  color:          rgba(232,224,208,.25);
+  letter-spacing: .04em;
 }
 
 /* ── Skeleton ────────────────────────────────────────────── */

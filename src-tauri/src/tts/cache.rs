@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use anyhow::Result;
 
 pub const MAX_ENTRIES:   usize    = 80;
 pub const MAX_BYTES:     usize    = 10 * 1024 * 1024; // 10 MB
@@ -41,7 +42,7 @@ struct Entry {
 // ── Cache principal ───────────────────────────────────────────
 
 pub struct TtsCache {
-    /// Cliente HTTP reutilizável — criado uma vez, sem overhead por chamada.
+    /// Cliente HTTP para chamadas à API HuggingFace Kokoro (vozes pt-BR).
     pub client: reqwest::Client,
     /// Mapa de chave → entrada. Chave = "voice\0text".
     map: HashMap<String, Entry>,
@@ -50,10 +51,9 @@ pub struct TtsCache {
 }
 
 impl TtsCache {
-    /// Cria o cache e o cliente HTTP com timeout configurado para a API TTS.
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new() -> Result<Self> {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(35)) // HuggingFace Space pode demorar no wake-up
+            .timeout(Duration::from_secs(90))
             .build()?;
         Ok(Self { client, map: HashMap::new(), total_bytes: 0 })
     }

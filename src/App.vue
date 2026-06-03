@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
 import { useGameStateStore } from './stores/gameState'
 import { useCoachStore }    from './stores/coach'
 import { useSettingsStore } from './stores/settings'
@@ -17,15 +18,27 @@ const settingsStore  = useSettingsStore()
 // em janelas que não deveriam tê-la (rune_panel, build_panel, flashcard).
 const _windowLabel   = getCurrentWindow().label
 const isOverlayWindow = ref(
-  _windowLabel === 'flashcard' || _windowLabel === 'rune_panel' || _windowLabel === 'build_panel'
+  _windowLabel === 'flashcard'     ||
+  _windowLabel === 'ward_win'      ||
+  _windowLabel === 'matchup_win'   ||
+  _windowLabel === 'champ_pick_win'||
+  _windowLabel === 'loading_win'   ||
+  _windowLabel === 'ingame_build'  ||
+  _windowLabel === 'rune_panel'    ||
+  _windowLabel === 'build_panel'
 )
 
 onMounted(async () => {
   const label = _windowLabel
 
-  if (label === 'flashcard') {
+  // Todas as janelas não-main precisam de fundo transparente imediatamente,
+  // antes de qualquer renderização, para evitar flash/fantasma branco.
+  if (label !== 'main') {
     document.body.style.backgroundColor = 'transparent'
     document.documentElement.style.backgroundColor = 'transparent'
+  }
+
+  if (label === 'flashcard') {
     await settingsStore.load()
     await Promise.all([
       gameStateStore.listenPhaseOnly(),
@@ -34,14 +47,17 @@ onMounted(async () => {
     return
   }
 
-  if (label === 'rune_panel' || label === 'build_panel') {
-    // Janelinhas independentes: recebem dados via eventos Tauri, sem init adicional
-    return
-  }
+  // Todas as janelas auxiliares (overlays + painéis) só precisam renderizar a
+  // sua página. Nenhuma delas deve iniciar o listener completo do LCU, pois
+  // múltiplas conexões WebSocket interferem no fluxo de eventos.
+  if (label !== 'main') return
 
   // Janela principal: carrega settings e inicia o game state listener
   await settingsStore.load()
   await gameStateStore.initListener()
+
+  // Acorda o HuggingFace Space TTS em background para reduzir latência no primeiro uso
+  invoke('warm_up_tts', { voice: settingsStore.ttsVoice }).catch(() => {})
 
   // Verifica atualizações 5s após init para não atrasar o startup
   setTimeout(() => updateModal.value?.checkForUpdates(), 5000)

@@ -89,12 +89,20 @@ impl GroqClient {
 
     /// Gera alertas de coaching situacionais com base no contexto da partida.
     /// Usado no pós-game para identificar momentos-chave perdidos (Fase 8).
-    pub async fn get_coaching_alerts(&self, ctx: &GameContext) -> Result<Vec<GroqAlert>> {
-        let system = "Você é um coach de League of Legends. \
+    pub async fn get_coaching_alerts(&self, ctx: &GameContext, language: &str) -> Result<Vec<GroqAlert>> {
+        let system = if language == "en-US" {
+            "You are a League of Legends coach. \
+            Analyze the context and return ONLY a JSON with key \"alerts\": array of objects with \
+            category (OBJECTIVE|VISION|MACRO|TRADE|POSITIONING), severity (INFO|WARNING|CRITICAL), \
+            message (max 15 words, English, actionable), reason (justification). \
+            Maximum 2 alerts. Return [] if there is no real urgency."
+        } else {
+            "Você é um coach de League of Legends. \
             Analise o contexto e retorne APENAS um JSON com chave \"alerts\": array de objetos com \
             category (OBJECTIVE|VISION|MACRO|TRADE|POSITIONING), severity (INFO|WARNING|CRITICAL), \
             message (máx 15 palavras, português, acionável), reason (justificativa). \
-            Máximo 2 alertas. Retorne [] se não há urgência real.";
+            Máximo 2 alertas. Retorne [] se não há urgência real."
+        };
 
         let user = format!(
             "Role: {} | Campeão: {} | Tempo: {}s | Placar: {}-{} | \
@@ -138,15 +146,27 @@ impl GroqClient {
         &self,
         pattern:          &PlayerPattern,
         matches_summary:  &str,
+        language:         &str,
     ) -> Result<PlayerInsights> {
-        let system = "Você é um coach de League of Legends especializado em perfil comportamental. \
-            Analise os dados e retorne APENAS um JSON com: \
-            playstyle (aggressive|passive|balanced), \
+        let system = if language == "en-US" {
+            "You are a League of Legends coach specialized in behavioral profiling. \
+            Analyze the data and return ONLY a JSON with these exact keys: \
+            playstyle (\"aggressive\"|\"passive\"|\"balanced\"), \
             strengths (array 1-3 strings), \
             weaknesses (array 1-3 strings), \
-            priority_tip (string), \
-            progress_note (string). \
-            Todas as strings em português.";
+            priorityTip (string), \
+            progressNote (string). \
+            All strings must be in English."
+        } else {
+            "Você é um coach de League of Legends especializado em perfil comportamental. \
+            Analise os dados e retorne APENAS um JSON com estas chaves exatas: \
+            playstyle (\"aggressive\"|\"passive\"|\"balanced\"), \
+            strengths (array 1-3 strings), \
+            weaknesses (array 1-3 strings), \
+            priorityTip (string), \
+            progressNote (string). \
+            Todas as strings em português."
+        };
 
         let user = format!(
             "Dados de padrão comportamental:\n\
@@ -198,22 +218,43 @@ impl GroqClient {
         alerts_text:    &str,
         pattern_text:   &str,
         recent_matches: &str,
+        language:       &str,
     ) -> Result<serde_json::Value> {
-        let system = "Você é um coach de League of Legends especializado em análise pós-game. \
+        let system = if language == "en-US" {
+            "You are a League of Legends post-game coach. \
+            Analyze the match data and return ONLY a JSON with: \
+            summary (string, 1-2 direct sentences about performance), \
+            strengths (array of 1-2 strings with concrete positives), \
+            improvements (array of 1-2 strings with priority areas), \
+            focus (string, ONE concrete actionable instruction for the next game). \
+            Use English, be direct and specific."
+        } else {
+            "Você é um coach de League of Legends especializado em análise pós-game. \
             Analise os dados da partida e retorne APENAS um JSON com: \
             summary (string, 1-2 frases diretas sobre o desempenho), \
             strengths (array de 1-2 strings com pontos positivos concretos), \
             improvements (array de 1-2 strings com áreas prioritárias), \
             focus (string, UMA instrução concreta e acionável para a próxima partida). \
-            Use português, seja direto e específico.";
+            Use português, seja direto e específico."
+        };
 
-        let user = format!(
-            "Partida: {champion} ({role}) | {result} | KDA {kda:.1} ({kills}/{deaths}/{assists}) \
-             | {cs_per_min:.1} cs/min | Visão: {vision_score} | {duration_min}min\n\
-             Alertas gerados no jogo: {alerts_text}\n\
-             Padrões históricos: {pattern_text}\n\
-             Últimas partidas:\n{recent_matches}",
-        );
+        let user = if language == "en-US" {
+            format!(
+                "Match: {champion} ({role}) | {result} | KDA {kda:.1} ({kills}/{deaths}/{assists}) \
+                 | {cs_per_min:.1} cs/min | Vision: {vision_score} | {duration_min}min\n\
+                 In-game alerts: {alerts_text}\n\
+                 Historical patterns: {pattern_text}\n\
+                 Recent matches:\n{recent_matches}",
+            )
+        } else {
+            format!(
+                "Partida: {champion} ({role}) | {result} | KDA {kda:.1} ({kills}/{deaths}/{assists}) \
+                 | {cs_per_min:.1} cs/min | Visão: {vision_score} | {duration_min}min\n\
+                 Alertas gerados no jogo: {alerts_text}\n\
+                 Padrões históricos: {pattern_text}\n\
+                 Últimas partidas:\n{recent_matches}",
+            )
+        };
 
         self.chat_request(system, &user).await
     }

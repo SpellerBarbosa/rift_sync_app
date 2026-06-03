@@ -238,12 +238,14 @@ impl WardAdvisor {
         WardAdvice { spots, alert }
     }
 
-    /// Retorna apenas os spots visuais (sem alerta textual).
+    /// Retorna os melhores spots: até 2 wards regulares + 1 control ward (pink).
+    /// Separação por tipo garante que a recomendação sempre inclua o posicionamento
+    /// do pink ward quando houver dados disponíveis no banco.
     pub fn get_spots(
         &self,
         game_time_sec: u32,
         is_red_side:   bool,
-        max_spots:     usize,
+        _max_spots:    usize,
     ) -> Vec<SmartWardSpot> {
         if self.placements.is_empty() {
             return Vec::new();
@@ -264,35 +266,54 @@ impl WardAdvisor {
             }
         }
 
-        // Ranking: win_rate × ln(count+1)
-        let mut ranked: Vec<(&RawPlacement, f64)> = candidates
+        // Separa por tipo de ward (copiando referências para evitar dupla indireção)
+        let filtered: Vec<&RawPlacement> = candidates
             .iter()
+            .copied()
             .filter(|p| p.count >= 2)
-            .map(|p| {
-                let wr    = if p.count > 0 { p.wins as f64 / p.count as f64 } else { 0.5 };
-                let score = wr * (p.count as f64 + 1.0).ln();
-                (*p, score)
-            })
             .collect();
 
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let (pinks, regulars): (Vec<&RawPlacement>, Vec<&RawPlacement>) = filtered
+            .iter()
+            .copied()
+            .partition(|p| p.ward_type == "CONTROL_WARD");
 
-        // Agrupa por proximidade — mantém o melhor de cada cluster
-        let mut selected: Vec<&RawPlacement> = Vec::new();
-        for (p, _) in &ranked {
-            if !selected.iter().any(|s| {
+        // Top 2 wards regulares (cluster por proximidade)
+        let mut ward_spots: Vec<&RawPlacement> = Vec::new();
+        for p in rank_by_score(regulars) {
+            if !ward_spots.iter().any(|s| {
                 (s.x - p.x).abs() < 500.0 && (s.y - p.y).abs() < 500.0
             }) {
-                selected.push(p);
+                ward_spots.push(p);
             }
-            if selected.len() >= max_spots { break; }
+            if ward_spots.len() >= 2 { break; }
         }
 
-        selected.iter().map(|p| to_spot(p, is_red_side, &self.tier_used)).collect()
+        // Top 1 control ward (pink)
+        let pink_spot: Vec<&RawPlacement> = rank_by_score(pinks)
+            .into_iter()
+            .take(1)
+            .collect();
+
+        // Monta lista final: wards regulares primeiro, depois pink
+        ward_spots.iter().chain(pink_spot.iter())
+            .map(|p| to_spot(p, is_red_side, &self.tier_used))
+            .collect()
     }
 }
 
 // ── Helpers privados ──────────────────────────────────────────
+
+/// Ordena placements por score (win_rate × ln(count+1)) decrescente.
+fn rank_by_score(list: Vec<&RawPlacement>) -> Vec<&RawPlacement> {
+    let mut v: Vec<(&RawPlacement, f64)> = list.into_iter().map(|p| {
+        let wr    = if p.count > 0 { p.wins as f64 / p.count as f64 } else { 0.5 };
+        let score = wr * (p.count as f64 + 1.0).ln();
+        (p, score)
+    }).collect();
+    v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    v.into_iter().map(|(p, _)| p).collect()
+}
 
 fn current_phase(game_time_sec: u32) -> &'static str {
     match game_time_sec {

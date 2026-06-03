@@ -1,11 +1,21 @@
 {
   "identifier": "overlay",
-  "description": "Permissões para a janela de overlay (flashcard) do RiftSync AI",
-  "windows": ["flashcard"],
+  "description": "Permissões para todas as janelas de overlay in-game do RiftSync AI",
+  "windows": [
+    "flashcard",
+    "ward_win",
+    "matchup_win",
+    "champ_pick_win",
+    "loading_win",
+    "ingame_build"
+  ],
   "permissions": [
     "core:default",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "core:event:allow-emit"
+    "core:event:allow-emit",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-ignore-cursor-events"
   ]
 }
