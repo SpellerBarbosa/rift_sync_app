@@ -1,6 +1,6 @@
 [package]
 name = "riftsync-ai"
-version = "0.3.3"
+version = "0.3.4"
 description = "RiftSync AI — Coach pessoal para League of Legends"
 authors = []
 edition = "2021"
@@ -22,6 +22,9 @@ tauri = { version = "2.1", features = [] }
 
 # Auto-update via GitHub Releases
 tauri-plugin-updater = "2"
+
+# Relaunch do app após atualização
+tauri-plugin-process = "2"
 
 # Serialização JSON (commands Tauri, respostas API)
 serde      = { version = "1", features = ["derive"] }

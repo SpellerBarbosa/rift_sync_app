@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { check } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
 
 // ── Estado ────────────────────────────────────────────────────
 const visible       = ref(false)
@@ -63,10 +64,12 @@ async function startDownload() {
   }
 }
 
-// No Windows com NSIS o instalador reinicia o app automaticamente
-// após downloadAndInstall — não é necessário chamar relaunch() explicitamente
-function installAndRestart() {
-  error.value = 'Reinicie o app manualmente para completar a atualização.'
+async function installAndRestart() {
+  try {
+    await relaunch()
+  } catch {
+    error.value = 'Reinicie o app manualmente para completar a atualização.'
+  }
 }
 
 function dismiss() {
