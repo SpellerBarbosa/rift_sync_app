@@ -37,11 +37,18 @@ jobs:
           "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}`nSPELLCOACH_API_KEY=${{ secrets.SPELLCOACH_API_KEY }}" |
             Out-File -FilePath src-tauri/.env -Encoding utf8NoBOM
 
+      # Escreve a chave privada em arquivo com line endings Unix (LF) para o Tauri conseguir parsear
+      - name: Write signing key
+        run: |
+          $key = "${{ secrets.TAURI_PRIVATE_KEY }}"
+          $key = $key -replace "`r`n", "`n" -replace "`r", "`n"
+          [System.IO.File]::WriteAllText("$env:RUNNER_TEMP\tauri.key", $key)
+
       - name: Build e publicar release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.temp }}\tauri.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
