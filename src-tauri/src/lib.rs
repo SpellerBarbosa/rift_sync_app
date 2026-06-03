@@ -80,9 +80,6 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // ── Variáveis de ambiente (.env em dev) ───────────
-            dotenvy::dotenv().ok();
-
             // ── Banco de dados ────────────────────────────────
             let db_conn = db::connection::init_db(app.handle())
                 .map_err(|e| {
@@ -92,8 +89,9 @@ pub fn run() {
             let db = Arc::new(Mutex::new(db_conn));
 
             // ── Cliente SpellCoach (opcional — requer SPELLCOACH_API_KEY) ─
-            let spellcoach_client = match std::env::var("SPELLCOACH_API_KEY") {
-                Ok(key) if !key.is_empty() => {
+            let spellcoach_client = match option_env!("SPELLCOACH_API_KEY") {
+                Some(key) if !key.is_empty() => {
+                    let key = key.to_string();
                     match spellcoach::SpellCoachClient::new(key) {
                         Ok(client) => {
                             tracing::info!("SpellCoach API conectada — stats de campeões ativo.");
@@ -112,8 +110,9 @@ pub fn run() {
             };
 
             // ── Cliente Groq (análise pós-game) ──────────────
-            let groq_client = match std::env::var("GROQ_API_KEY") {
-                Ok(key) if !key.is_empty() => {
+            let groq_client = match option_env!("GROQ_API_KEY") {
+                Some(key) if !key.is_empty() => {
+                    let key = key.to_string();
                     match groq::client::GroqClient::new(key) {
                         Ok(c) => {
                             tracing::info!("Groq API conectada — análise pós-game ativa.");

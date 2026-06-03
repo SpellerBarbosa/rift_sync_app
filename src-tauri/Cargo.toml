@@ -1,6 +1,6 @@
 [package]
 name = "riftsync-ai"
-version = "0.3.2"
+version = "0.3.3"
 description = "RiftSync AI — Coach pessoal para League of Legends"
 authors = []
 edition = "2021"
@@ -59,8 +59,6 @@ uuid = { version = "1", features = ["v4"] }
 # Traits Stream/Sink para o cliente WebSocket
 futures-util = "0.3"
 
-# Carrega variáveis do arquivo .env em desenvolvimento
-dotenvy = "0.15"
 
 # Timestamps para cooldowns e contexto dos alertas
 chrono = { version = "0.4", features = ["serde"] }
@@ -86,6 +84,9 @@ windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
 ] }
+
+[dev-dependencies]
+dotenvy = "0.15"
 
 [features]
 # Necessário para builds de produção — não remover
