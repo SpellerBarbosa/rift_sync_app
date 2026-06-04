@@ -37,16 +37,15 @@ jobs:
           "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}`nSPELLCOACH_API_KEY=${{ secrets.SPELLCOACH_API_KEY }}" |
             Out-File -FilePath src-tauri/.env -Encoding utf8NoBOM
 
-      # Converte line endings da chave para LF e injeta no ambiente do runner
-      # (GitHub Actions não avalia expressões em valores de env multilinea diretamente)
-      - name: Write signing key to env
+      # Escreve a chave com LF explícito via WriteAllText e passa o caminho
+      # (evita corrupção por CRLF que Add-Content introduz no GITHUB_ENV)
+      - name: Write signing key
         run: |
           $key = "${{ secrets.TAURI_PRIVATE_KEY }}"
           $key = $key -replace "`r`n", "`n" -replace "`r", "`n"
-          $delimiter = "EOF_TAURI_KEY_$([System.Guid]::NewGuid().ToString('N'))"
-          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY<<$delimiter"
-          Add-Content -Path $env:GITHUB_ENV -Value $key
-          Add-Content -Path $env:GITHUB_ENV -Value $delimiter
+          $keyPath = "$env:RUNNER_TEMP\tauri.key"
+          [System.IO.File]::WriteAllText($keyPath, $key, [System.Text.Encoding]::UTF8)
+          "TAURI_SIGNING_PRIVATE_KEY=$keyPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Build e publicar release
         uses: tauri-apps/tauri-action@v0
@@ -64,7 +63,7 @@ jobs:
             Usuários com versão anterior: o app atualiza automaticamente.
           releaseDraft: false
           prerelease: false
-          updaterJsonEnabled: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
       - name: Upload instalador com nome fixo
