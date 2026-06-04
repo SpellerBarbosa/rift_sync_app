@@ -37,11 +37,16 @@ jobs:
           "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}`nSPELLCOACH_API_KEY=${{ secrets.SPELLCOACH_API_KEY }}" |
             Out-File -FilePath src-tauri/.env -Encoding utf8NoBOM
 
+      # Remove trailing newline que GitHub pode adicionar ao secret
+      - name: Set signing key
+        run: |
+          $key = "${{ secrets.TAURI_PRIVATE_KEY }}".Trim()
+          "TAURI_SIGNING_PRIVATE_KEY=$key" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
+
       - name: Build e publicar release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
