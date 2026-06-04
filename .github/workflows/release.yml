@@ -66,23 +66,40 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
-      - name: Debug sig
-        run: |
-          $sig = Get-ChildItem "src-tauri\target\release\bundle\nsis\*.nsis.zip.sig" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($sig) {
-            Write-Host "Sig file: $($sig.Name) | Size: $($sig.Length) bytes"
-            if ($sig.Length -gt 0) {
-              $txt = Get-Content $sig.FullName -Raw
-              Write-Host "Starts with: $($txt.Substring(0, [Math]::Min(50, $txt.Length)))"
-            } else {
-              Write-Host "ARQUIVO VAZIO — signing falhou silenciosamente"
-            }
-          } else {
-            Write-Host "Nenhum .nsis.zip.sig encontrado"
-          }
-          Write-Host "TAURI_SIGNING_PRIVATE_KEY length: $($env:TAURI_SIGNING_PRIVATE_KEY.Length)"
+      - name: Gerar e publicar latest.json
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $bundleDir = "src-tauri\target\release\bundle\nsis"
+          $nsisZip = Get-ChildItem "$bundleDir\*.nsis.zip" | Select-Object -First 1
+          $nsisSig = Get-ChildItem "$bundleDir\*.nsis.zip.sig" | Select-Object -First 1
+
+          if (-not $nsisZip -or -not $nsisSig) { Write-Error "NSIS zip/sig nao encontrado"; exit 1 }
+
+          $sigContent = (Get-Content $nsisSig.FullName -Raw).Trim()
+          if (-not $sigContent) { Write-Error "Sig file vazio — signing falhou"; exit 1 }
+
+          $version = (Get-Content "src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json).version
+          $tag     = "${{ github.ref_name }}"
+
+          gh release upload $tag "$($nsisZip.FullName)" --clobber
+
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/$([Uri]::EscapeDataString($nsisZip.Name))"
+          $json = [ordered]@{
+            version  = $version
+            notes    = ""
+            pub_date = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $sigContent
+                url       = $url
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+
+          $json | Out-File -FilePath "latest.json" -Encoding utf8NoBOM
+          gh release upload $tag "latest.json" --clobber
+          Write-Host "latest.json publicado com sucesso — versao $version"
 
       - name: Upload instalador com nome fixo
         env:
