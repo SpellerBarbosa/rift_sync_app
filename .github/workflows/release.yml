@@ -75,14 +75,18 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath $zipPath -Force
           Write-Host "Zip criado: $(Split-Path $zipPath -Leaf) ($('{0:N0}' -f (Get-Item $zipPath).Length) bytes)"
 
-          # Assinar o zip com o Tauri signer
+          # Escrever chave em arquivo e assinar (evita prompt interativo de password)
+          $keyFile = "$env:RUNNER_TEMP\signer.key"
           $key = "${{ secrets.TAURI_PRIVATE_KEY }}".Trim()
-          npx tauri signer sign --private-key $key $zipPath
+          [System.IO.File]::WriteAllText($keyFile, $key, [System.Text.UTF8Encoding]::new($false))
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+          npx --no-install tauri signer sign -k $keyFile "$zipPath"
           $sigPath = "$zipPath.sig"
 
+          if (-not (Test-Path $sigPath)) { Write-Error "Sig nao gerado"; exit 1 }
           $sigContent = (Get-Content $sigPath -Raw).Trim()
-          if (-not $sigContent) { Write-Error "Sig vazio apos assinar"; exit 1 }
-          Write-Host "Assinatura gerada ($(($sigContent).Length) chars)"
+          if (-not $sigContent) { Write-Error "Sig vazio"; exit 1 }
+          Write-Host "Assinatura gerada ($($sigContent.Length) chars)"
 
           # Publicar zip na release
           $tag = "${{ github.ref_name }}"
