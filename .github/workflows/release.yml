@@ -70,11 +70,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $bundleDir = "src-tauri\target\release\bundle\nsis"
-          $nsisZip = Get-ChildItem "$bundleDir\*.nsis.zip" | Select-Object -First 1
-          $nsisSig = Get-ChildItem "$bundleDir\*.nsis.zip.sig" | Select-Object -First 1
+          $bundleDir = Join-Path $env:GITHUB_WORKSPACE "src-tauri\target\release\bundle\nsis"
+          Write-Host "Bundle dir: $bundleDir"
+          Get-ChildItem $bundleDir -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table
+          $nsisZip = Get-ChildItem "$bundleDir\*.nsis.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $nsisSig = Get-ChildItem "$bundleDir\*.nsis.zip.sig" -ErrorAction SilentlyContinue | Select-Object -First 1
 
-          if (-not $nsisZip -or -not $nsisSig) { Write-Error "NSIS zip/sig nao encontrado"; exit 1 }
+          if (-not $nsisZip -or -not $nsisSig) { Write-Error "NSIS zip/sig nao encontrado em $bundleDir"; exit 1 }
 
           $sigContent = (Get-Content $nsisSig.FullName -Raw).Trim()
           if (-not $sigContent) { Write-Error "Sig file vazio — signing falhou"; exit 1 }
