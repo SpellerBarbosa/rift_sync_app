@@ -19,6 +19,9 @@ src-tauri/gen/
 *.log
 logs/
 
+# Claude Code — permissões locais, nunca commitar (pode conter segredos em curl allows)
+.claude/
+
 # Editor
 .vscode/settings.json
 .idea/
