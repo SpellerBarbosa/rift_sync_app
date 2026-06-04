@@ -415,10 +415,6 @@ pub async fn run_coach_loop(
                     ocr_enemy_top = Some(top);
                     ocr_enemy_bot = Some(bot);
                 }
-            } else if let Some(rest) = event.strip_prefix("minimap_enemy_pos:") {
-                // Detecção de dots por cor — usada apenas para contagem por zona
-                // (ocr_enemy_top / ocr_enemy_bot). Ward reveal usa template matching.
-                let _ = parse_enemy_positions(rest);
             } else if let Some(rest) = event.strip_prefix("enemy_template:") {
                 if let Some((x, y, idx)) = parse_template_match(rest) {
                     // Resolve nome do campeão pelo índice no vetor de inimigos
@@ -1077,18 +1073,6 @@ fn parse_minimap_enemy(s: &str) -> Option<(u8, u8)> {
     Some((top, bot))
 }
 
-/// Parseia "x1,y1;x2,y2;..." em lista de posições percentuais.
-fn parse_enemy_positions(s: &str) -> Vec<(f32, f32)> {
-    if s.is_empty() { return Vec::new(); }
-    s.split(';')
-        .filter_map(|pair| {
-            let mut it = pair.splitn(2, ',');
-            let x: f32 = it.next()?.parse().ok()?;
-            let y: f32 = it.next()?.parse().ok()?;
-            Some((x, y))
-        })
-        .collect()
-}
 
 /// Detecta ward-reveals via template matching com dupla proteção contra spam:
 ///   1. Confirmação em 2 frames consecutivos (~4s) — template já é confiável

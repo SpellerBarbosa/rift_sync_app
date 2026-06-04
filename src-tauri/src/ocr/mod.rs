@@ -23,8 +23,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tauri::AppHandle;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
+
+#[derive(Serialize)]
+struct EnemyDot { x: f32, y: f32 }
 
 use crate::game_state::states::GamePhase;
 use tokio::sync::Mutex;
@@ -150,14 +154,16 @@ pub async fn run_ocr_loop(
                 enemies.top_zone, enemies.bot_zone
             ));
 
-            // Posições individuais de dots inimigos
+            // Posições individuais de dots inimigos — emite direto ao overlay,
+            // sem passar pelo engine (dado puramente visual, sem lógica de coaching).
             let enemy_pos = minimap::detect_enemy_positions(&img);
-            let pos_str: String = enemy_pos
-                .iter()
-                .map(|(x, y)| format!("{x:.1},{y:.1}"))
-                .collect::<Vec<_>>()
-                .join(";");
-            let _ = tx.try_send(format!("minimap_enemy_pos:{pos_str}"));
+            if !enemy_pos.is_empty() {
+                let dots: Vec<EnemyDot> = enemy_pos
+                    .iter()
+                    .map(|&(x, y)| EnemyDot { x, y })
+                    .collect();
+                let _ = app.emit_to("ward_win", "minimap_enemy_dot", &dots);
+            }
 
             // ── Template matching de campeões inimigos ─────────────
             let templates_snap = enemy_templates.lock().await.clone();

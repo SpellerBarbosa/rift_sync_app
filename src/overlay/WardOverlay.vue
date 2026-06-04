@@ -121,10 +121,15 @@ let dismissTimer: ReturnType<typeof setTimeout> | null = null
 let lastShownAt  = 0
 let lastSpotKey  = ''
 
+/** Dots brutos de detecção por cor — baixa confiança, sem label. */
+interface EnemyDot { x: number; y: number }
+const enemyDots = ref<EnemyDot[]>([])
+
 let unlistenSpots:       UnlistenFn | null = null
 let unlistenSpotsForced: UnlistenFn | null = null
 let unlistenSmartSpots:  UnlistenFn | null = null
 let unlistenTeam:        UnlistenFn | null = null
+let unlistenEnemyDots:   UnlistenFn | null = null
 
 function showSpots(spots: string[]) {
   const valid = spots.filter(id => SPOTS.value[id])
@@ -160,7 +165,8 @@ onMounted(async () => {
   unlistenSpots       = await listen<string[]>('ward_spots',        e => showSpots(e.payload))
   unlistenSpotsForced = await listen<string[]>('ward_spots_forced', e => showSpotsForced(e.payload))
   unlistenSmartSpots  = await listen<SmartWardSpot[]>('ward_spots_smart', e => showSmartSpots(e.payload))
-  unlistenTeam        = await listen<boolean>( 'team_side',         e => { isBlueSide.value = e.payload })
+  unlistenTeam        = await listen<boolean>('team_side',          e => { isBlueSide.value = e.payload })
+  unlistenEnemyDots   = await listen<EnemyDot[]>('minimap_enemy_dot', e => { enemyDots.value = e.payload })
 })
 
 onUnmounted(() => {
@@ -168,6 +174,7 @@ onUnmounted(() => {
   unlistenSpotsForced?.()
   unlistenSmartSpots?.()
   unlistenTeam?.()
+  unlistenEnemyDots?.()
   clearTimeout(dismissTimer ?? undefined)
   clearTimeout(smartDismissTimer ?? undefined)
 })
@@ -230,6 +237,14 @@ onUnmounted(() => {
               top:  spot.yPct + '%',
               '--c': spot.color,
             }"
+          />
+
+          <!-- Dots de detecção por cor (baixa confiança — sem label) -->
+          <div
+            v-for="(dot, i) in enemyDots"
+            :key="'edot-' + i"
+            class="wb-dot wb-dot-enemy-raw"
+            :style="{ left: dot.x + '%', top: dot.y + '%' }"
           />
         </div>
 
@@ -486,6 +501,19 @@ onUnmounted(() => {
   from { width: 100%; }
   to   { width:   0%; }
 }
+
+/* ── Dot de detecção por cor: triângulo âmbar, baixa opacidade ── */
+.wb-dot-enemy-raw {
+  width:         6px;
+  height:        6px;
+  border-radius: 1px;
+  background:    #F59E0B;
+  opacity:       0.45;
+  transform:     translate(-50%, -50%) rotate(45deg);
+  animation:     none;
+  pointer-events: none;
+}
+.wb-dot-enemy-raw::after { display: none; }
 
 /* ── Dot SpellCoach: diamante em vez de círculo ─────────── */
 .wb-dot-smart {

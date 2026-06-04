@@ -349,6 +349,38 @@ impl ProcEngine {
             }
         }
 
+        // ── Inimigo com kill → danger window ──────────────────────
+        if new_enemy > prev_enemy {
+            if let Some(p) = pattern {
+                if p.aggression_score > 0.65 && game_time < 1500 {
+                    if let Some(a) = self.make_alert(
+                        "enemy_kill_aggression_warning", "TRADE", "WARN",
+                        t!(lang,
+                           "Inimigo com kill — power spike ativo, evite trade direto agora",
+                           "Enemy has a kill — power spike active, avoid direct trade now"),
+                        game_time, 90,
+                    ) { alerts.push(a); }
+                }
+                if p.avg_deaths_10_15 > 0.8 && game_time > 600 && game_time < 900 {
+                    if let Some(a) = self.make_alert(
+                        "enemy_kill_death_window", "MACRO", "WARN",
+                        t!(lang,
+                           "Você costuma morrer nessa janela — inimigo com kill aumenta o risco",
+                           "You tend to die in this window — enemy kill raises the risk"),
+                        game_time, 120,
+                    ) { alerts.push(a); }
+                }
+            } else if game_time < 480 {
+                if let Some(a) = self.make_alert(
+                    "enemy_kill_early", "TRADE", "INFO",
+                    t!(lang,
+                       "Inimigo marcou — posicione atrás da wave até o spike passar",
+                       "Enemy scored — position behind the wave until the spike fades"),
+                    game_time, 90,
+                ) { alerts.push(a); }
+            }
+        }
+
         alerts
     }
 

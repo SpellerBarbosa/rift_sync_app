@@ -169,9 +169,9 @@
 
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM1MUY2MzY4MDJEOTBBNzMKUldSekN0a0NhR01mTlRpU3lsUmV0VGhaY25xQkFFU1RKaUxJREU4YkErdm5JbzF2ajkxZ0dTaUgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwQUIwMkJCQzgwM0ZENDgKUldSSS9RUEl1d0tyOEltZTlVTEhFZGJtOGZ5Y2g5K2xUSkZDbUlqR2F3SlIyYkdMNHAvQXpGTkcK",
       "endpoints": [
-        "https://github.com/SpellerBarbosa/riftsyncai/releases/latest/download/latest.json"
+        "https://github.com/SpellerBarbosa/rift_sync_app/releases/latest/download/latest.json"
       ],
       "dialog": false
     }
