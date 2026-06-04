@@ -61,27 +61,38 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
-      - name: Gerar e publicar latest.json
+      # createUpdaterArtifacts ignorado no CLI 2.1.x — criamos e assinamos manualmente
+      - name: Criar zip e gerar latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           $bundleDir = Join-Path $env:GITHUB_WORKSPACE "src-tauri\target\release\bundle\nsis"
-          Write-Host "Bundle dir: $bundleDir"
-          Get-ChildItem $bundleDir -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table
-          $nsisZip = Get-ChildItem "$bundleDir\*.nsis.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
-          $nsisSig = Get-ChildItem "$bundleDir\*.nsis.zip.sig" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $exe = Get-ChildItem "$bundleDir\*_x64-setup.exe" | Select-Object -First 1
 
-          if (-not $nsisZip -or -not $nsisSig) { Write-Error "NSIS zip/sig nao encontrado em $bundleDir"; exit 1 }
+          # Criar .nsis.zip a partir do instalador
+          $zipPath = $exe.FullName -replace "\.exe$", ".nsis.zip"
+          Compress-Archive -Path $exe.FullName -DestinationPath $zipPath -Force
+          Write-Host "Zip criado: $(Split-Path $zipPath -Leaf) ($('{0:N0}' -f (Get-Item $zipPath).Length) bytes)"
 
-          $sigContent = (Get-Content $nsisSig.FullName -Raw).Trim()
-          if (-not $sigContent) { Write-Error "Sig file vazio — signing falhou"; exit 1 }
+          # Assinar o zip com o Tauri signer
+          $key = "${{ secrets.TAURI_PRIVATE_KEY }}".Trim()
+          npx tauri signer sign --private-key $key $zipPath
+          $sigPath = "$zipPath.sig"
 
+          $sigContent = (Get-Content $sigPath -Raw).Trim()
+          if (-not $sigContent) { Write-Error "Sig vazio apos assinar"; exit 1 }
+          Write-Host "Assinatura gerada ($(($sigContent).Length) chars)"
+
+          # Publicar zip na release
+          $tag = "${{ github.ref_name }}"
+          gh release upload $tag $zipPath --clobber
+
+          # Gerar latest.json
           $version = (Get-Content "src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json).version
-          $tag     = "${{ github.ref_name }}"
+          $zipName = Split-Path $zipPath -Leaf
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/$([Uri]::EscapeDataString($zipName))"
 
-          gh release upload $tag "$($nsisZip.FullName)" --clobber
-
-          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/$([Uri]::EscapeDataString($nsisZip.Name))"
           $json = [ordered]@{
             version  = $version
             notes    = ""
@@ -96,7 +107,7 @@ jobs:
 
           $json | Out-File -FilePath "latest.json" -Encoding utf8NoBOM
           gh release upload $tag "latest.json" --clobber
-          Write-Host "latest.json publicado com sucesso — versao $version"
+          Write-Host "latest.json publicado — versao $version"
 
       - name: Upload instalador com nome fixo
         env:
