@@ -75,12 +75,10 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath $zipPath -Force
           Write-Host "Zip criado: $(Split-Path $zipPath -Leaf) ($('{0:N0}' -f (Get-Item $zipPath).Length) bytes)"
 
-          # Escrever chave em arquivo e assinar (evita prompt interativo de password)
-          $keyFile = "$env:RUNNER_TEMP\signer.key"
+          # Assinar — senha vazia em env evita prompt interativo; chave como string direta
           $key = "${{ secrets.TAURI_PRIVATE_KEY }}".Trim()
-          [System.IO.File]::WriteAllText($keyFile, $key, [System.Text.UTF8Encoding]::new($false))
           $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-          npx --no-install tauri signer sign -k $keyFile "$zipPath"
+          npx --no-install tauri signer sign -k "$key" "$zipPath"
           $sigPath = "$zipPath.sig"
 
           if (-not (Test-Path $sigPath)) { Write-Error "Sig nao gerado"; exit 1 }
