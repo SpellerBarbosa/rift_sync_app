@@ -44,7 +44,8 @@ jobs:
           $key = "${{ secrets.TAURI_PRIVATE_KEY }}"
           $key = $key -replace "`r`n", "`n" -replace "`r", "`n"
           $keyPath = "$env:RUNNER_TEMP\tauri.key"
-          [System.IO.File]::WriteAllText($keyPath, $key, [System.Text.Encoding]::UTF8)
+          $utf8NoBOM = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllBytes($keyPath, $utf8NoBOM.GetBytes($key))
           "TAURI_SIGNING_PRIVATE_KEY=$keyPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Build e publicar release
