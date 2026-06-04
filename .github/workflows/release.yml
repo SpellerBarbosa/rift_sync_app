@@ -57,6 +57,24 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
+      - name: Debug sig
+        run: |
+          $sig = Get-ChildItem "src-tauri\target\release\bundle\nsis\*.nsis.zip.sig" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($sig) {
+            Write-Host "Sig file: $($sig.Name) | Size: $($sig.Length) bytes"
+            if ($sig.Length -gt 0) {
+              $txt = Get-Content $sig.FullName -Raw
+              Write-Host "Starts with: $($txt.Substring(0, [Math]::Min(50, $txt.Length)))"
+            } else {
+              Write-Host "ARQUIVO VAZIO — signing falhou silenciosamente"
+            }
+          } else {
+            Write-Host "Nenhum .nsis.zip.sig encontrado"
+          }
+          Write-Host "TAURI_SIGNING_PRIVATE_KEY length: $($env:TAURI_SIGNING_PRIVATE_KEY.Length)"
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+
       - name: Upload instalador com nome fixo
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
